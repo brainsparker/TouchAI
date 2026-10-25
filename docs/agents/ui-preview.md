@@ -1,0 +1,149 @@
+# UI Preview
+
+Read this when changing `.github/workflows/ui-preview.yml`, `.github/ui-preview/**`, or the
+preview comment a pull request receives.
+
+## What it does
+
+A pull request that changes desktop interface files gets one advisory comment with screenshots and
+an mp4 of the built app. The comment is updated in place on every commit. It is not part of
+`CI Required` and never blocks a merge.
+
+## When it runs
+
+The preview runs when at least one changed file can change what the desktop app renders:
+
+```text
+apps/desktop/src/views/**
+apps/desktop/src/components/**
+apps/desktop/src/styles/**
+apps/desktop/src/i18n/**
+apps/desktop/src/assets/**
+apps/desktop/src/router/**
+apps/desktop/index.html
+apps/desktop/src-tauri/src/core/window/**
+apps/desktop/src-tauri/tauri*.conf.json
+```
+
+Tests, docs, and the official site never trigger it, even inside those directories.
+
+| Author | UI change | Result |
+| --- | --- | --- |
+| `admin`, `maintain`, or `write` | yes | Runs automatically |
+| anyone else | yes | Waiting comment, nothing runs |
+| anyone else, approved | yes | Runs on every later commit |
+| any author, `status:ui-preview-skip` | any | Skipped, and the comment says so |
+
+A maintainer approves by commenting `/ui-preview` on the pull request, or by adding
+`status:ui-preview-approved`. The label is added automatically after a valid command so later
+commits keep running. Removing the label revokes the approval. Draft pull requests wait for
+`ready_for_review` unless a maintainer forces a run.
+
+The `ui-preview` label forces a run, including on a pull request that only changed a composable.
+
+## Trust model
+
+The workflow is split so that no job both runs pull-request code and holds a secret.
+
+| Job | Checks out | Secrets | Permissions |
+| --- | --- | --- | --- |
+| `detect` | default branch | App key | `contents: read` |
+| `explore` | pull-request head | none | `contents: read` |
+| `plan` | default branch | model key | `contents: read`, `pull-requests: read` |
+| `record` | default branch | none | `contents: read` |
+| `publish` | default branch | upload token, App key | `contents: read` |
+
+`explore` is the only job that checks out the pull request, and it is the only job that builds it.
+`record` runs the binary that `explore` produced, but drives it with scripts from the default
+branch, so a pull request cannot change the recorder. `plan` and `publish` never execute
+pull-request code.
+
+## Pipeline
+
+```text
+detect   decide, comment, output pr/sha
+explore  build once, boot under Xvfb, collect test ids and locale parity
+plan     diff + outline -> validated JSON scene plan
+record   run the plan, capture screenshots and mp4
+publish  validate evidence, upload assets, update the comment
+```
+
+The model sees the diff, the description, and the test ids. Its answer is data: every action is
+allowlisted, every click target must be a `data-testid` the build actually rendered, and every
+string has a length cap. When the model is unavailable or its plan is rejected, a deterministic
+plan for the changed surfaces is used instead, and the comment names the fallback.
+
+## Credentials
+
+Publishing needs two credentials because GitHub's upload endpoint and comment API accept different
+identity classes.
+
+| Name | Kind | Used for |
+| --- | --- | --- |
+| `UI_PREVIEW_MODEL_API_KEY` | secret, `ui-preview` | the model call |
+| `UI_PREVIEW_MODEL_BASE_URL`, `UI_PREVIEW_MODEL` | variables, `ui-preview` | endpoint and model |
+| `UI_PREVIEW_TOKEN` | secret, `ui-preview-publish` | `POST /user-attachments/assets` only |
+| `UI_PREVIEW_APP_ID`, `UI_PREVIEW_APP_PRIVATE_KEY` | secrets, `ui-preview-publish` | the comment only |
+
+The upload endpoint returns `404` for GitHub App installation tokens and for App user-to-server
+tokens. It needs a token that belongs to a user with `admin`, `maintain` or `write` on the
+repository. The comment endpoints accept an App installation token with `Issues: write` or
+`Pull requests: write`. An upload has no author field, so the asset URL carries no attribution and
+the comment carries the bot identity.
+
+Every asset is referenced as a bare URL on its own line. That is required, not cosmetic: an
+uploaded asset is only served to readers after a comment references it as a bare URL. An `<img>`
+tag returns `404` for everyone except the uploader, even though the upload itself succeeded.
+
+Both environments restrict deployments to protected branches, so only a workflow running from the
+default branch can read them.
+
+## The comment
+
+There is exactly one comment per pull request, identified by `<!-- touchai-ui-preview -->` on its
+first line. Publishing:
+
+1. lists the pull-request comments;
+2. keeps only comments whose author is the token's own account;
+3. picks the oldest one that starts with the marker;
+4. patches it, or creates one when none exists;
+5. skips the write when the rendered body is identical.
+
+Filtering on the author is required: a contributor can put the marker in their own comment, and the
+API refuses an edit to a comment the token does not own. `gh pr comment --edit-last` is not used
+because it edits the last comment by the token's account, which is not necessarily the preview.
+
+## Local verification
+
+```bash
+pnpm test:unit -- ui-preview
+node .github/ui-preview/doctor.mjs --mode=model
+node .github/ui-preview/doctor.mjs --mode=publish
+```
+
+The `UI Preview Doctor` workflow runs the same checks from Actions, where the secrets live: dispatch
+it and read the two jobs. `doctor` proves the model endpoint, the bot identity, and the upload
+credential, and names the credential class that failed. It never posts a comment. Run it after
+rotating a secret and before the first preview on a real pull request.
+
+The full recorder needs a Linux desktop stack: `xvfb`, `openbox`, `picom`, `ffmpeg`, `imagemagick`,
+`xdotool`, `webkit2gtk-driver`, and `tauri-driver`.
+
+## Failure behavior
+
+A failed step is written to the manifest and published as `Recording stopped: <step>`. The comment
+then shows the evidence that exists and states that it does not claim the change works. The
+recording is never retried into a pass.
+
+## Limitations
+
+- Capture is Linux WebKitGTK only. Windows WebView2 and macOS may render differently.
+- The desktop search and settings surfaces are covered. Tray and popup windows need test-only
+  openers and get their own follow-up.
+- Locale coverage is a static key-parity check, not a rendered comparison in both languages.
+- Video is the whole 1280x900 virtual display; screenshots are cropped to the focused window.
+
+## Disabling
+
+Add `status:ui-preview-skip` to the pull request. To stop the mechanism for the repository, disable
+the `UI Preview` workflow; nothing else depends on it.
