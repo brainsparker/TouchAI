@@ -14,6 +14,7 @@ export const SEARCH_PROVIDER_IDS = [
     'tavily',
     'exa',
     'firecrawl',
+    'youcom',
     'searxng',
     'deepseek',
 ] as const;
@@ -133,6 +134,16 @@ export const SEARCH_PROVIDER_METADATA: Record<SearchProviderId, SearchProviderMe
         displayName: 'Firecrawl',
         sourceName: 'Firecrawl',
         recommendation: 'Search plus crawl-oriented discovery; free without an API key.',
+    },
+    youcom: {
+        id: 'youcom',
+        enabledByDefault: false,
+        apiKeyRequirement: 'optional',
+        endpointRequirement: 'none',
+        displayName: 'You.com',
+        sourceName: 'You.com',
+        recommendation:
+            'Broad web search with LLM-ready snippets; free without an API key (100 searches/day), key raises limits.',
     },
     searxng: {
         id: 'searxng',

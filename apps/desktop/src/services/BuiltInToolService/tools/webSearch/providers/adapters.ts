@@ -17,6 +17,7 @@ import { semanticScholarAdapter } from './semanticScholar';
 import { tavilyAdapter } from './tavily';
 import type { WebSearchProviderAdapter } from './types';
 import { wikipediaAdapter } from './wikipedia';
+import { youcomAdapter } from './youcom';
 
 function requiresApiKey(provider: SearchProviderId): boolean {
     return SEARCH_PROVIDER_METADATA[provider].apiKeyRequirement === 'required';
@@ -62,6 +63,7 @@ export const WEB_SEARCH_PROVIDER_ADAPTERS = [
     tavilyAdapter,
     exaAdapter,
     firecrawlAdapter,
+    youcomAdapter,
     searxngAdapter,
     deepSeekSearchAdapter,
 ] as const satisfies readonly WebSearchProviderAdapter[];

@@ -23,6 +23,7 @@ export const WEB_SEARCH_PROVIDERS = [
     'tavily',
     'exa',
     'firecrawl',
+    'youcom',
     'wikipedia',
     'openalex',
     'semantic_scholar',

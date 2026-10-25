@@ -51,6 +51,7 @@ describe('user searches the web from the assistant', () => {
                 'tavily',
                 'exa',
                 'firecrawl',
+                'youcom',
                 'wikipedia',
                 'openalex',
                 'semantic_scholar',
@@ -559,6 +560,91 @@ describe('user searches the web from the assistant', () => {
         // 匿名档必须改发 access-mode 头，且不能带空的 Bearer 凭据。
         expect(headers['x-tavily-access-mode']).toBe('keyless');
         expect(headers.Authorization).toBeUndefined();
+    });
+
+    it('user sees You.com free tier used with GET when no API key is configured', async () => {
+        getSettingValueMock.mockResolvedValueOnce(
+            JSON.stringify({
+                providers: {
+                    youcom: { enabled: true, apiKey: '' },
+                },
+            })
+        );
+        tauriFetchMock.mockResolvedValueOnce(
+            new Response(
+                JSON.stringify({
+                    results: {
+                        web: [
+                            {
+                                title: 'You.com keyless result',
+                                url: 'https://example.com/youcom-keyless',
+                                description: '',
+                                snippets: ['Free tier', 'snippet'],
+                            },
+                        ],
+                    },
+                }),
+                { status: 200, headers: { 'content-type': 'application/json' } }
+            )
+        );
+
+        const result = await executeWebSearchTool(
+            { query: 'OpenClaw keyless', provider: 'youcom' },
+            {},
+            createExecutionContext()
+        );
+
+        expect(result.isError).toBe(false);
+        expect(result.result).toContain('You.com keyless result');
+        expect(result.result).toContain('Free tier snippet');
+        const [url, init] = lastFetchCall();
+        const parsed = new URL(url);
+        expect(parsed.origin + parsed.pathname).toBe('https://api.you.com/v1/agents/search');
+        expect(parsed.searchParams.get('query')).toBe('OpenClaw keyless');
+        expect(init.method).toBe('GET');
+        const headers = init.headers as Record<string, string>;
+        expect(headers['User-Agent']).toBe('youdotcom-integration/TouchAI-org-TouchAI');
+        expect(headers['X-API-Key']).toBeUndefined();
+    });
+
+    it('user sees You.com keyed endpoint used when an API key is configured', async () => {
+        getSettingValueMock.mockResolvedValueOnce(
+            JSON.stringify({
+                providers: {
+                    youcom: { enabled: true, apiKey: 'ydc-key' },
+                },
+            })
+        );
+        tauriFetchMock.mockResolvedValueOnce(
+            new Response(
+                JSON.stringify({
+                    results: {
+                        web: [
+                            {
+                                title: 'You.com keyed result',
+                                url: 'https://example.com/youcom',
+                                description: 'Keyed description',
+                            },
+                        ],
+                    },
+                }),
+                { status: 200, headers: { 'content-type': 'application/json' } }
+            )
+        );
+
+        const result = await executeWebSearchTool(
+            { query: 'OpenClaw updates', provider: 'youcom' },
+            {},
+            createExecutionContext()
+        );
+
+        expect(result.isError).toBe(false);
+        expect(result.result).toContain('You.com keyed result');
+        const [url, init] = lastFetchCall();
+        expect(url).toBe('https://ydc-index.io/v1/search');
+        expect(init.method).toBe('POST');
+        expect((init.headers as Record<string, string>)['X-API-Key']).toBe('ydc-key');
+        expect(JSON.parse(init.body as string)).toMatchObject({ query: 'OpenClaw updates' });
     });
 
     it('user sees Firecrawl keyless mode used when no API key is configured', async () => {

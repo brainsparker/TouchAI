@@ -118,6 +118,7 @@ describe('user edits the search settings', () => {
             expect.stringContaining('Tavily'),
             expect.stringContaining('Exa'),
             expect.stringContaining('Firecrawl'),
+            expect.stringContaining('You.com'),
             expect.stringContaining('SearXNG'),
             expect.stringContaining('DeepSeek'),
         ]);

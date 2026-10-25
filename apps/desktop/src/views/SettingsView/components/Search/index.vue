@@ -103,6 +103,12 @@
             keyPlaceholder: 'settings.search.provider.firecrawl.keyPlaceholder',
             quotaLabel: 'settings.search.provider.firecrawl.quota',
         },
+        youcom: {
+            label: 'settings.search.provider.youcom',
+            description: 'settings.search.provider.youcom.description',
+            keyPlaceholder: 'settings.search.provider.youcom.keyPlaceholder',
+            quotaLabel: 'settings.search.provider.youcom.quota',
+        },
         searxng: {
             label: 'settings.search.provider.searxng',
             description: 'settings.search.provider.searxng.description',
