@@ -204,6 +204,23 @@ export function buildWaitingComment(input) {
     ].join('\n');
 }
 
+/**
+ * Written the moment a run starts, so the old evidence is not mistaken for
+ * this commit's result while the build and the recording are still going.
+ */
+export function buildRecordingComment(input) {
+    return [
+        MARKER,
+        '## UI preview',
+        '',
+        `\`${input.sha.slice(0, 7)}\` · recording`,
+        '',
+        'This commit is being built and recorded. The evidence below replaces this note when the run finishes.',
+        '',
+        '<sub>Advisory only. Add `status:ui-preview-skip` to silence this pull request.</sub>',
+    ].join('\n');
+}
+
 export function buildSkippedComment(input) {
     return [
         MARKER,

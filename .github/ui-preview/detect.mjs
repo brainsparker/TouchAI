@@ -1,6 +1,6 @@
 /**
- * Decides whether this pull request gets a preview, and writes the waiting or
- * skipped comment when it does not.
+ * Decides whether this pull request gets a preview, and writes the waiting,
+ * skipped, or recording comment.
  *
  * Runs trusted code only: it never checks out the pull request. The App token it
  * receives can read the pull request and write one issue comment.
@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 
 import {
+    buildRecordingComment,
     buildSkippedComment,
     buildWaitingComment,
     findOwnPreviewComment,
@@ -143,6 +144,16 @@ async function main() {
 
     if (result.decision === DECISION.run && result.addApprovedLabel && !dryRun) {
         await client.addLabels(prNumber, ['status:ui-preview-approved']);
+    }
+
+    if (result.decision === DECISION.run && !dryRun) {
+        const comments = await client.listComments(prNumber);
+        const existing = findOwnPreviewComment(comments, botLogin);
+        const body = buildRecordingComment({ sha: pull.head.sha });
+
+        if (existing && !isUnchanged(existing.body, body)) {
+            await client.updateComment(existing.id, body);
+        }
     }
 
     if (dryRun) {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
     buildPreviewComment,
+    buildRecordingComment,
     buildSkippedComment,
     buildWaitingComment,
     findOwnPreviewComment,
@@ -118,6 +119,15 @@ describe('user reads the preview comment', () => {
 });
 
 describe('user reads the waiting and skipped comments', () => {
+    it('user sees that the commit is being recorded instead of the previous evidence', () => {
+        const body = buildRecordingComment({ sha: 'a1b2c3d4e5f6' });
+
+        expect(body.startsWith(MARKER)).toBe(true);
+        expect(body).toContain('`a1b2c3d`');
+        expect(body).toContain('recording');
+        expect(body).toContain('replaces this note');
+    });
+
     it('user sees how to approve when a maintainer has not approved yet', () => {
         const body = buildWaitingComment({ sha: 'a1b2c3d4e5f6' });
 

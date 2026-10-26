@@ -114,6 +114,12 @@ The recording must show a flow, not a still image with a duration.
 - Screenshots are captured by window id. Cropping the root by an earlier geometry produced black
   frames when the app recentred itself after a resize.
 
+## Comment lifecycle
+
+The single comment is rewritten three times at most: `waiting for a maintainer` before any build,
+`recording` the moment a run starts, then the evidence. The recording note replaces the previous
+commit's evidence, so a stale clip cannot be read as this commit's result.
+
 ## When a step fails
 
 The recorder retries a failed step once and falls back to a DOM click, a DOM hover, or a window
