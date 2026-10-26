@@ -16,7 +16,7 @@ import { buildPreviewComment, findOwnPreviewComment, isUnchanged } from './lib/c
 import { MIME_TYPES, validateEvidence } from './lib/evidence.mjs';
 import { createClient } from './lib/github.mjs';
 
-const MAX_SHOTS = 6;
+const MAX_SHOTS = 10;
 
 function env(name, fallback = '') {
     return process.env[name] ?? fallback;

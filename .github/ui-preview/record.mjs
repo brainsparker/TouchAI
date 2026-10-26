@@ -463,6 +463,17 @@ async function main() {
                 mark(scene.title);
                 await sleep(400);
 
+                const overflow = await measureOverflow(session);
+
+                manifest.checks.push({
+                    name: `No horizontal overflow at ${overflow.innerWidth}px (${scene.title})`,
+                    status: overflow.overflowX > 1 ? 'fail' : 'pass',
+                    detail:
+                        overflow.overflowX > 1
+                            ? `${overflow.overflowX}px wider than the window`
+                            : '',
+                });
+
                 for (const step of scene.steps) {
                     currentStep = `${step.do}${step.value ? ` ${step.value}` : ''}${step.target ? ` ${step.target}` : ''}`;
                     const caption = describeStep(step);
@@ -491,7 +502,6 @@ async function main() {
 
                     if (step.do === 'shot') {
                         await sleep(200);
-                        const overflow = await measureOverflow(session);
                         await isolateSurface(display, scene.surface, state);
                         const file = `${scene.surface}-${step.name}.png`;
 
@@ -520,15 +530,6 @@ async function main() {
                             caption: step.caption ?? '',
                             width: size.width,
                             height: size.height,
-                        });
-
-                        manifest.checks.push({
-                            name: `No horizontal overflow at ${overflow.innerWidth}px (${scene.title})`,
-                            status: overflow.overflowX > 1 ? 'fail' : 'pass',
-                            detail:
-                                overflow.overflowX > 1
-                                    ? `${overflow.overflowX}px wider than the window`
-                                    : '',
                         });
                         continue;
                     }
