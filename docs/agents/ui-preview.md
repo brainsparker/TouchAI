@@ -102,12 +102,15 @@ display-mode change with the same preference. Both helpers export the actual dis
 recorder fails before booting the app when the display is smaller than 1280x900.
 
 The workflow does not modify TCC. On macOS it relies on the screen-capture grant and replayd
-approval present in the hosted runner image, and the first post-merge macOS run is what validates
-that assumption. If capture is denied, the recorder keeps the screenshots and publishes the capture
-failure instead of a video.
+approval present in the hosted runner image. The `UI Preview Native Validation` workflow exercises
+the macOS and Windows capture path on every labeled pull request without publishing a comment. If
+capture is denied, the recorder keeps the screenshots and publishes the capture failure instead of
+a video.
 
 Linux records the 1280x900 Xvfb root directly. macOS and Windows record the larger desktop and crop
-the top-left 1280x900 stage in the caption pass, so all three videos have the same shape.
+the top-left 1280x900 stage while burning captions, so all three videos have the same shape. If a
+runner's ffmpeg cannot render subtitles, the recorder retries the crop without captions instead of
+publishing the uncropped desktop.
 
 ## Fixture data
 
@@ -138,6 +141,8 @@ The recording must show a flow, not a still image with a duration.
 - Linux and Windows capture at 10 fps and write a constant 30 fps stream. Capturing 30 fps on the
   shared Linux runner dropped most frames and produced a video much shorter than the session.
 - Step captions are burned into a strip below the window, not drawn over the UI.
+- Captions are best-effort. The crop is mandatory when the runner desktop is larger than the stage,
+  so a subtitle failure cannot change the video dimensions or hide the app window.
 - The overlay draws a fading trail and a ring on each click, so a viewer can follow the path. The
   operating-system pointer is disabled in the native capture to avoid a second, unrelated cursor.
 - A `shot` may name a `data-testid`; that screenshot is cropped to the element with room around it

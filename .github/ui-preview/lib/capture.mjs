@@ -479,16 +479,8 @@ function filterPath(file) {
     return file.replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'");
 }
 
-/**
- * Burns the captions into a copy of the recording. Returns the output path, or
- * null when ffmpeg cannot render subtitles in this environment.
- */
-export function burnCaptions({ input, output, title, durationMs, steps, crop = null }) {
-    const assFile = `${output}.ass`;
-    fs.writeFileSync(assFile, buildAss({ title, durationMs, steps }));
-    const filters = [crop, `ass=${filterPath(assFile)}`].filter(Boolean).join(',');
-
-    const result = run('ffmpeg', [
+function encodeVideo({ input, output, filter, runFfmpeg = run }) {
+    return runFfmpeg('ffmpeg', [
         '-hide_banner',
         '-loglevel',
         'error',
@@ -496,7 +488,7 @@ export function burnCaptions({ input, output, title, durationMs, steps, crop = n
         '-i',
         input,
         '-vf',
-        filters,
+        filter,
         '-c:v',
         'libx264',
         '-preset',
@@ -509,6 +501,33 @@ export function burnCaptions({ input, output, title, durationMs, steps, crop = n
         '+faststart',
         output,
     ]);
+}
+
+/**
+ * Burns the captions into a copy of the recording. Returns the output path, or
+ * null when ffmpeg cannot render subtitles in this environment.
+ */
+export function burnCaptions({
+    input,
+    output,
+    title,
+    durationMs,
+    steps,
+    crop = null,
+    runFfmpeg = run,
+}) {
+    // A basename in the current working directory avoids escaping drive letters
+    // and separators in the filter graph. New ffmpeg builds also require the
+    // explicit `filename` option that older builds accepted implicitly.
+    const assFile = path.join(
+        process.cwd(),
+        `.touchai-ui-preview-${process.pid}-${Date.now()}.ass`
+    );
+    fs.writeFileSync(assFile, buildAss({ title, durationMs, steps }));
+    const filters = [crop, `ass=filename=${filterPath(path.basename(assFile))}`]
+        .filter(Boolean)
+        .join(',');
+    const result = encodeVideo({ input, output, filter: filters, runFfmpeg });
 
     if (result.status !== 0) {
         console.log(`could not burn captions: ${result.stderr.slice(0, 500)}`);
@@ -519,6 +538,62 @@ export function burnCaptions({ input, output, title, durationMs, steps, crop = n
 
     fs.rmSync(assFile, { force: true });
     return output;
+}
+
+/**
+ * Crops a recording without captions. This is the fallback when the runner's
+ * ffmpeg build cannot render subtitles, so the preview still has its stage size.
+ */
+export function cropVideo({ input, output, crop, runFfmpeg = run }) {
+    const result = encodeVideo({ input, output, filter: crop, runFfmpeg });
+
+    if (result.status !== 0) {
+        console.log(`could not crop the recording: ${result.stderr.slice(0, 500)}`);
+        fs.rmSync(output, { force: true });
+        return null;
+    }
+
+    return output;
+}
+
+/**
+ * Produces the final recording. Captions are best-effort; the display crop is
+ * not, because the hosted runners can record a larger desktop than the stage.
+ *
+ * @returns {{ output: string | null, captionsBurned: boolean, cropped: boolean }}
+ */
+export function finalizeRecording({
+    input,
+    output,
+    title,
+    durationMs,
+    steps,
+    crop = null,
+    runFfmpeg = run,
+}) {
+    const captioned = burnCaptions({
+        input,
+        output,
+        title,
+        durationMs,
+        steps,
+        crop,
+        runFfmpeg,
+    });
+
+    if (captioned) {
+        return { output: captioned, captionsBurned: true, cropped: Boolean(crop) };
+    }
+
+    if (crop) {
+        const cropped = cropVideo({ input, output, crop, runFfmpeg });
+
+        if (cropped) {
+            return { output: cropped, captionsBurned: false, cropped: true };
+        }
+    }
+
+    return { output: null, captionsBurned: false, cropped: false };
 }
 
 export function ensureDir(directory) {

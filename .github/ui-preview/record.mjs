@@ -15,11 +15,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import {
-    burnCaptions,
     captureScreenshot,
     countDistinctStates,
     cropToElement,
     ensureDir,
+    finalizeRecording,
     hideWindow,
     listAppWindows,
     moveWindow,
@@ -1148,7 +1148,7 @@ async function main() {
 
             if (result.ok) {
                 const crop = buildCropFilter(displaySize.width, displaySize.height);
-                const captioned = burnCaptions({
+                const finalized = finalizeRecording({
                     input: rawVideo,
                     output: videoFile,
                     title: `${sha.slice(0, 7)} · ${title || 'UI preview'}`,
@@ -1157,13 +1157,21 @@ async function main() {
                     crop,
                 });
 
-                if (captioned) {
+                if (finalized.output) {
                     fs.rmSync(rawVideo, { force: true });
+
+                    if (!finalized.captionsBurned) {
+                        manifest.warnings.push(
+                            finalized.cropped
+                                ? 'captions could not be burned in; the recording was cropped without captions'
+                                : 'captions could not be burned in; the native recording was published as-is'
+                        );
+                    }
                 } else {
                     fs.rmSync(videoFile, { force: true });
                     fs.renameSync(rawVideo, videoFile);
                     manifest.warnings.push(
-                        'captions could not be burned in; the native recording was published as-is'
+                        'the display crop and captions could not be applied; the native recording was published as-is'
                     );
                 }
 

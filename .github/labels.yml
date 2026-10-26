@@ -61,3 +61,6 @@
 - name: 'status:ui-preview-skip'
   color: '6e7781'
   description: Skip the UI preview for this pull request
+- name: 'ui-preview-native-validation'
+  color: 'bfd4f2'
+  description: Re-run native macOS and Windows capture without publishing a comment

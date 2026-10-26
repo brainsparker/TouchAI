@@ -23,6 +23,9 @@ not install the workspace to run them.
 `lib/video-limits.mjs` holds the minimum duration, frame count, distinct states, and coverage that
 both the recorder and the publisher enforce.
 
+The label-triggered `.github/workflows/ui-preview-native-validation.yml` re-runs native macOS and
+Windows capture without publishing a comment. Use it to check a capture change before merge.
+
 ```bash
 pnpm test:unit -- ui-preview
 ```
