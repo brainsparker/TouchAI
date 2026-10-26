@@ -1,0 +1,119 @@
+name: UI Preview Native Validation
+
+on:
+    pull_request:
+        types:
+            - labeled
+
+permissions:
+    contents: read
+    pull-requests: read
+
+jobs:
+    record:
+        name: Validate ${{ matrix.platform }}
+        if: github.event.label.name == 'ui-preview-native-validation'
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - platform: macos
+                      os: macos-15
+                      binary: TouchAI
+                    - platform: windows
+                      os: windows-latest
+                      binary: TouchAI.exe
+        runs-on: ${{ matrix.os }}
+        timeout-minutes: 90
+        env:
+            CARGO_TARGET_DIR: ${{ github.workspace }}/.ui-preview-target
+            TOUCHAI_E2E: '1'
+            UI_PREVIEW_PLATFORM: ${{ matrix.platform }}
+        steps:
+            - name: Check out the pull request
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  ref: ${{ github.event.pull_request.head.sha }}
+                  fetch-depth: 0
+                  persist-credentials: false
+
+            - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6
+
+            - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+              with:
+                  node-version: 22
+                  package-manager-cache: false
+
+            - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+            - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+              with:
+                  workspaces: apps/desktop/src-tauri -> ../../../.ui-preview-target
+
+            - name: Install frontend dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Configure the hosted display (macOS)
+              if: matrix.platform == 'macos'
+              run: swift .github/ui-preview/macos-display.swift --configure-hosted
+
+            - name: Configure the hosted display (Windows)
+              if: matrix.platform == 'windows'
+              shell: pwsh
+              run: ./.github/ui-preview/configure-display.ps1
+
+            - name: Build the desktop app
+              run: pnpm tauri build --debug --no-bundle --features ui-preview-webdriver
+
+            - name: Collect the outline
+              env:
+                  UI_PREVIEW_APP_BINARY: ${{ env.CARGO_TARGET_DIR }}/debug/${{ matrix.binary }}
+                  UI_PREVIEW_OUT: ${{ github.workspace }}/ui-preview-out
+                  UI_PREVIEW_SHA: ${{ github.event.pull_request.head.sha }}
+                  UI_PREVIEW_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+                  TOUCHAI_APP_ROOT: ${{ runner.temp }}/ui-preview-app-root
+              run: node .github/ui-preview/explore.mjs
+
+            - name: Plan the deterministic preview
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  UI_PREVIEW_OUT: ${{ github.workspace }}/ui-preview-out
+                  UI_PREVIEW_PR: ${{ github.event.pull_request.number }}
+              run: node .github/ui-preview/plan.mjs
+
+            - name: Install macOS recording dependencies
+              if: matrix.platform == 'macos'
+              run: brew install ffmpeg
+
+            - name: Install Windows recording dependencies
+              if: matrix.platform == 'windows'
+              shell: pwsh
+              run: |
+                  if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+                    choco install ffmpeg -y --no-progress
+                  }
+                  ffmpeg -version | Select-Object -First 1
+
+            - name: Record the native preview
+              env:
+                  UI_PREVIEW_APP_BINARY: ${{ env.CARGO_TARGET_DIR }}/debug/${{ matrix.binary }}
+                  UI_PREVIEW_OUT: ${{ github.workspace }}/ui-preview-out
+                  UI_PREVIEW_SHA: ${{ github.event.pull_request.head.sha }}
+                  UI_PREVIEW_PR: ${{ github.event.pull_request.number }}
+                  UI_PREVIEW_TITLE: ${{ github.event.pull_request.title }}
+                  UI_PREVIEW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+                  UI_PREVIEW_TRIGGER: native validation
+                  UI_PREVIEW_SEED: '1'
+                  TOUCHAI_APP_ROOT: ${{ runner.temp }}/ui-preview-app-root
+              run: node .github/ui-preview/record.mjs
+
+            - name: Upload evidence
+              if: always()
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+              with:
+                  name: ui-preview-native-validation-${{ matrix.platform }}
+                  if-no-files-found: warn
+                  retention-days: 14
+                  path: |
+                      ui-preview-out/manifest.json
+                      ui-preview-out/evidence
