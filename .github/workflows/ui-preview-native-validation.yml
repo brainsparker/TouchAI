@@ -17,6 +17,9 @@ jobs:
             fail-fast: false
             matrix:
                 include:
+                    - platform: linux
+                      os: ubuntu-24.04
+                      binary: TouchAI
                     - platform: macos
                       os: macos-15
                       binary: TouchAI
@@ -53,6 +56,32 @@ jobs:
             - name: Install frontend dependencies
               run: pnpm install --frozen-lockfile
 
+            - name: Install Linux dependencies
+              if: matrix.platform == 'linux'
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y --no-install-recommends \
+                    build-essential \
+                    curl \
+                    ffmpeg \
+                    file \
+                    fonts-noto-cjk \
+                    imagemagick \
+                    libayatana-appindicator3-dev \
+                    libglib2.0-dev \
+                    librsvg2-dev \
+                    libssl-dev \
+                    libwebkit2gtk-4.1-dev \
+                    libxdo-dev \
+                    openbox \
+                    picom \
+                    pkg-config \
+                    wget \
+                    x11-utils \
+                    x11-xserver-utils \
+                    xdotool \
+                    xvfb
+
             - name: Configure the hosted display (macOS)
               if: matrix.platform == 'macos'
               run: swift .github/ui-preview/macos-display.swift --configure-hosted
@@ -66,6 +95,7 @@ jobs:
               run: pnpm tauri build --debug --no-bundle --features ui-preview-webdriver
 
             - name: Collect the outline
+              if: matrix.platform != 'linux'
               env:
                   UI_PREVIEW_APP_BINARY: ${{ env.CARGO_TARGET_DIR }}/debug/${{ matrix.binary }}
                   UI_PREVIEW_OUT: ${{ github.workspace }}/ui-preview-out
@@ -73,6 +103,21 @@ jobs:
                   UI_PREVIEW_BASE_SHA: ${{ github.event.pull_request.base.sha }}
                   TOUCHAI_APP_ROOT: ${{ runner.temp }}/ui-preview-app-root
               run: node .github/ui-preview/explore.mjs
+
+            - name: Collect the outline (Linux)
+              if: matrix.platform == 'linux'
+              env:
+                  UI_PREVIEW_APP_BINARY: ${{ env.CARGO_TARGET_DIR }}/debug/${{ matrix.binary }}
+                  UI_PREVIEW_OUT: ${{ github.workspace }}/ui-preview-out
+                  UI_PREVIEW_SHA: ${{ github.event.pull_request.head.sha }}
+                  UI_PREVIEW_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+                  UI_PREVIEW_DISPLAY_WIDTH: '1280'
+                  UI_PREVIEW_DISPLAY_HEIGHT: '900'
+                  TOUCHAI_APP_ROOT: ${{ runner.temp }}/ui-preview-app-root
+              run: |
+                  xvfb-run -a --server-args='-screen 0 1280x900x24' \
+                    .github/ui-preview/with-display.sh \
+                    node .github/ui-preview/explore.mjs
 
             - name: Plan the deterministic preview
               env:
@@ -95,6 +140,7 @@ jobs:
                   ffmpeg -version | Select-Object -First 1
 
             - name: Record the native preview
+              if: matrix.platform != 'linux'
               env:
                   UI_PREVIEW_APP_BINARY: ${{ env.CARGO_TARGET_DIR }}/debug/${{ matrix.binary }}
                   UI_PREVIEW_OUT: ${{ github.workspace }}/ui-preview-out
@@ -106,6 +152,24 @@ jobs:
                   UI_PREVIEW_SEED: '1'
                   TOUCHAI_APP_ROOT: ${{ runner.temp }}/ui-preview-app-root
               run: node .github/ui-preview/record.mjs
+
+            - name: Record the native preview (Linux)
+              if: matrix.platform == 'linux'
+              env:
+                  UI_PREVIEW_APP_BINARY: ${{ env.CARGO_TARGET_DIR }}/debug/${{ matrix.binary }}
+                  UI_PREVIEW_OUT: ${{ github.workspace }}/ui-preview-out
+                  UI_PREVIEW_SHA: ${{ github.event.pull_request.head.sha }}
+                  UI_PREVIEW_PR: ${{ github.event.pull_request.number }}
+                  UI_PREVIEW_TITLE: ${{ github.event.pull_request.title }}
+                  UI_PREVIEW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+                  UI_PREVIEW_TRIGGER: native validation
+                  UI_PREVIEW_SEED: '1'
+                  UI_PREVIEW_DISPLAY_WIDTH: '1280'
+                  UI_PREVIEW_DISPLAY_HEIGHT: '900'
+                  TOUCHAI_APP_ROOT: ${{ runner.temp }}/ui-preview-app-root
+              run: |
+                  xvfb-run -a --server-args='-screen 0 1280x900x24' \
+                    .github/ui-preview/with-display.sh node .github/ui-preview/record.mjs
 
             - name: Upload evidence
               if: always()

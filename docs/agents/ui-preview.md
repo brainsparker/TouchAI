@@ -103,9 +103,9 @@ recorder fails before booting the app when the display is smaller than 1280x900.
 
 The workflow does not modify TCC. On macOS it relies on the screen-capture grant and replayd
 approval present in the hosted runner image. The `UI Preview Native Validation` workflow exercises
-the macOS and Windows capture path on every labeled pull request without publishing a comment. If
-capture is denied, the recorder keeps the screenshots and publishes the capture failure instead of
-a video.
+the Linux, macOS, and Windows capture path on a labeled pull request without publishing a comment.
+If capture is denied, the recorder keeps the screenshots and publishes the capture failure instead
+of a video.
 
 Linux records the 1280x900 Xvfb root directly. macOS and Windows record the larger desktop and crop
 the top-left 1280x900 stage while burning captions, so all three videos have the same shape. If a
