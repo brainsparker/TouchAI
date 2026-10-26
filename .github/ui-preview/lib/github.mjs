@@ -156,6 +156,13 @@ export function createClient({ token, owner, repo }) {
             });
         },
 
+        async removeLabel(number, label) {
+            return request(
+                `${API}${repoPath}/issues/${number}/labels/${encodeURIComponent(label)}`,
+                { token, method: 'DELETE' }
+            );
+        },
+
         async getIssueLabels(number) {
             const issue = await request(`${API}${repoPath}/issues/${number}`, { token });
             return (issue?.labels ?? []).map((label) =>

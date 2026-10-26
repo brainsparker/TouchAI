@@ -39,6 +39,10 @@ A maintainer approves by commenting `/ui-preview` on the pull request, or by add
 commits keep running. Removing the label revokes the approval. Draft pull requests wait for
 `ready_for_review` unless a maintainer forces a run.
 
+The workflow checks the actor who added `status:ui-preview-approved` or `ui-preview`. If a
+non-maintainer adds either label, the run does not start and the label is removed, because the
+triage role can also apply labels.
+
 The `ui-preview` label forces a run, including on a pull request that only changed a composable.
 
 ## Trust model

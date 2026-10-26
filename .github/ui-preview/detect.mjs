@@ -15,7 +15,7 @@ import {
     findOwnPreviewComment,
     isUnchanged,
 } from './lib/comment.mjs';
-import { decide, DECISION } from './lib/decision.mjs';
+import { APPROVED_LABEL, decide, DECISION, FORCE_LABEL } from './lib/decision.mjs';
 import { createClient, resolveBotLogin } from './lib/github.mjs';
 import { classifyFiles } from './lib/paths.mjs';
 
@@ -83,6 +83,17 @@ async function main() {
     const labels = (pull.labels ?? []).map((label) =>
         typeof label === 'string' ? label : label.name
     );
+    const labelName = event?.label?.name;
+    const labelActor = String(event?.sender?.login ?? '');
+    const labelActorIsBot = labelActor.endsWith('[bot]');
+    const gatedLabel =
+        eventName === 'pull_request_target' &&
+        event?.action === 'labeled' &&
+        [FORCE_LABEL, APPROVED_LABEL].includes(labelName);
+    const labelActorMaintainer =
+        !gatedLabel ||
+        labelActorIsBot ||
+        (labelActor.length > 0 && isMaintainerPermission(await client.getPermission(labelActor)));
 
     let maintainer = false;
     let commentAuthorMaintainer = false;
@@ -108,11 +119,17 @@ async function main() {
         isPullRequestComment,
         commentBody: event?.comment?.body,
         commentAuthorMaintainer,
+        labelActorMaintainer,
         manualForce,
     });
 
     console.log(`decision: ${result.decision} (${result.reason})`);
     console.log(`ui files: ${classification.ui.length}`);
+
+    if (gatedLabel && !labelActorIsBot && !labelActorMaintainer && !dryRun) {
+        await client.removeLabel(prNumber, labelName);
+        console.log(`removed ${labelName}: only a maintainer may apply it`);
+    }
 
     if (result.decision === DECISION.awaitingApproval && !dryRun) {
         const body = buildWaitingComment({ sha: pull.head.sha });

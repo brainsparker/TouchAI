@@ -50,6 +50,7 @@ export function isPreviewCommand(body) {
  * @param {boolean} [input.isPullRequestComment]
  * @param {string} [input.commentBody]
  * @param {boolean} [input.commentAuthorMaintainer]
+ * @param {boolean} [input.labelActorMaintainer]
  * @param {boolean} [input.manualForce]
  * @returns {{ decision: string, reason: string, addApprovedLabel: boolean }}
  */
@@ -59,8 +60,11 @@ export function decide(input) {
     );
     const eventName = input.eventName;
     const action = input.action ?? '';
-    const forced = labels.includes(FORCE_LABEL);
-    const approved = labels.includes(APPROVED_LABEL);
+    // A label is only an approval when the event that added it came from a
+    // maintainer. Triage can apply labels, so the label alone is not proof.
+    const trustedLabelActor = input.labelActorMaintainer !== false;
+    const forced = labels.includes(FORCE_LABEL) && trustedLabelActor;
+    const approved = labels.includes(APPROVED_LABEL) && trustedLabelActor;
 
     if (labels.includes(SKIP_LABEL)) {
         return {

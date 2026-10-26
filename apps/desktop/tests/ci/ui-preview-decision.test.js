@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    APPROVED_LABEL,
     decide,
     DECISION,
+    FORCE_LABEL,
     isPreviewCommand,
 } from '../../../../.github/ui-preview/lib/decision.mjs';
 
@@ -106,11 +108,38 @@ describe('user works with an approval label', () => {
             ...base,
             action: 'labeled',
             actor: 'hiqiancheng',
-            labelName: 'status:ui-preview-approved',
-            labels: ['status:ui-preview-approved'],
+            labelName: APPROVED_LABEL,
+            labels: [APPROVED_LABEL],
+            labelActorMaintainer: true,
         });
 
         expect(result.decision).toBe(DECISION.run);
+    });
+
+    it('user waits when an outside collaborator adds the approval label', () => {
+        const result = decide({
+            ...base,
+            action: 'labeled',
+            actor: 'triage-user',
+            labelName: APPROVED_LABEL,
+            labels: [APPROVED_LABEL],
+            labelActorMaintainer: false,
+        });
+
+        expect(result.decision).toBe(DECISION.awaitingApproval);
+    });
+
+    it('user waits when an outside collaborator adds the force label', () => {
+        const result = decide({
+            ...base,
+            action: 'labeled',
+            actor: 'triage-user',
+            labelName: FORCE_LABEL,
+            labels: [FORCE_LABEL],
+            labelActorMaintainer: false,
+        });
+
+        expect(result.decision).toBe(DECISION.awaitingApproval);
     });
 });
 
