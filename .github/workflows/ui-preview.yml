@@ -23,6 +23,10 @@ on:
                 required: false
                 type: boolean
                 default: false
+            plan_json:
+                description: A plan JSON to use instead of the model
+                required: false
+                type: string
 
 permissions: {}
 
@@ -236,6 +240,7 @@ jobs:
                   UI_PREVIEW_MODEL_API_KEY: ${{ secrets.UI_PREVIEW_MODEL_API_KEY }}
                   UI_PREVIEW_MODEL_BASE_URL: ${{ vars.UI_PREVIEW_MODEL_BASE_URL }}
                   UI_PREVIEW_MODEL: ${{ vars.UI_PREVIEW_MODEL }}
+                  UI_PREVIEW_PLAN_JSON: ${{ inputs.plan_json }}
               run: node .github/ui-preview/plan.mjs
 
             - name: Upload the plan
@@ -304,6 +309,7 @@ jobs:
                   UI_PREVIEW_TITLE: ${{ needs.detect.outputs.title }}
                   UI_PREVIEW_RUN_URL: ${{ needs.detect.outputs.run_url }}
                   UI_PREVIEW_TRIGGER: ${{ needs.detect.outputs.trigger }}
+                  UI_PREVIEW_SEED: '1'
                   TOUCHAI_APP_ROOT: ${{ runner.temp }}/ui-preview-app-root
               run: |
                   chmod +x ui-preview-out/debug/TouchAI

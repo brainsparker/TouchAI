@@ -15,6 +15,7 @@ import path from 'node:path';
 import { buildPreviewComment, findOwnPreviewComment, isUnchanged } from './lib/comment.mjs';
 import { MIME_TYPES, validateEvidence } from './lib/evidence.mjs';
 import { createClient } from './lib/github.mjs';
+import { findSecret } from './lib/secret-scan.mjs';
 
 const MAX_SHOTS = 10;
 
@@ -91,6 +92,24 @@ async function main() {
     }
 
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+
+    const leak = findSecret(fs.readFileSync(manifestPath, 'utf8'));
+
+    if (leak) {
+        await write(
+            buildPreviewComment({
+                sha: manifest.sha ?? sha,
+                runUrl,
+                trigger,
+                failure:
+                    'the evidence contains a credential-shaped string, so nothing was published',
+                checks: [],
+                artifactUrl,
+            })
+        );
+        throw new Error(`refusing to publish: a credential-shaped string (${leak.sample})`);
+    }
+
     const validation = validateEvidence(evidenceDir, manifest);
 
     if (!validation.ok) {
@@ -128,6 +147,7 @@ async function main() {
             unseen: manifest.unseen,
             scenes: manifest.scenes,
             checks: manifest.checks ?? [],
+            skippedSteps: manifest.skippedSteps ?? [],
             assets: Object.fromEntries(
                 validation.assets.shots.map((file) => [
                     file,
@@ -204,6 +224,7 @@ async function main() {
             .join(' '),
         scenes: renderedScenes,
         checks: manifest.checks ?? [],
+        skippedSteps: manifest.skippedSteps ?? [],
         assets,
         videoUrl: validation.assets.video ? assets[validation.assets.video] : '',
         artifactUrl,

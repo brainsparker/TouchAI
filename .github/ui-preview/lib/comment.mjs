@@ -102,6 +102,7 @@ function renderScene(scene, assets) {
  * @param {string} [input.videoUrl]
  * @param {string} [input.artifactUrl]
  * @param {string} [input.failure]
+ * @param {Array<{ scene?: string, step?: string, error?: string }>} [input.skippedSteps]
  * @param {string} [input.note]
  */
 export function buildPreviewComment(input) {
@@ -145,6 +146,22 @@ export function buildPreviewComment(input) {
 
     if (input.unseen) {
         lines.push('', `**Not shown:** ${input.unseen}`);
+    }
+
+    if (input.skippedSteps?.length) {
+        lines.push(
+            '',
+            `<details><summary>${input.skippedSteps.length} step(s) did not run</summary>`,
+            '',
+            input.skippedSteps
+                .map(
+                    (item) =>
+                        `- ${item.scene ? `${item.scene}: ` : ''}${item.step ?? 'step'} - ${item.error ?? 'failed'}`
+                )
+                .join('\n'),
+            '',
+            '</details>'
+        );
     }
 
     lines.push(

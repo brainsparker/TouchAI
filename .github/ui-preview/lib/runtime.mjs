@@ -145,13 +145,116 @@ export async function collectSettingsSections(session) {
 }
 
 /**
+ * A compact map of what is on screen, so the planner knows which test id is a
+ * button, a field, or a heading, and which ones sit below the fold.
+ *
+ * Only test ids can be clicked, but the surrounding labels and roles are what
+ * let the model choose the right one. Elements without a test id are kept as
+ * context when they are interactive or carry text.
+ */
+export async function collectOutline(session, limit = 60, skip = []) {
+    const outline = await session.execute(
+        `
+        const max = Number(arguments[0]) || 60;
+        const skip = new Set(arguments[1] || []);
+        const rows = [];
+        const interactive = 'button,a,input,select,textarea,summary';
+        const roles = new Set(['button', 'link', 'tab', 'switch', 'checkbox', 'menuitem', 'option']);
+        const ownText = (element) =>
+            [...element.childNodes]
+                .filter((node) => node.nodeType === 3)
+                .map((node) => node.textContent.trim())
+                .join(' ')
+                .replace(/\\s+/g, ' ')
+                .trim();
+        const attributeLabel = (element) =>
+            String(
+                element.getAttribute('aria-label') ||
+                    element.getAttribute('placeholder') ||
+                    element.getAttribute('title') ||
+                    ''
+            )
+                .replace(/\\s+/g, ' ')
+                .trim();
+
+        for (const element of document.querySelectorAll('body *')) {
+            if (rows.length >= max) {
+                break;
+            }
+
+            if (element.closest('#__ui_preview_overlay') || element.closest('[data-ui-preview]')) {
+                continue;
+            }
+
+            const rect = element.getBoundingClientRect();
+            const style = getComputedStyle(element);
+
+            if (
+                rect.width < 2 ||
+                rect.height < 2 ||
+                style.visibility === 'hidden' ||
+                style.display === 'none' ||
+                Number(style.opacity) === 0
+            ) {
+                continue;
+            }
+
+            const testId = element.getAttribute('data-testid');
+
+            if (testId && skip.has(testId)) {
+                continue;
+            }
+
+            // A label inside a control that already has a test id is the same
+            // thing twice; keep the control.
+            if (!testId && element.closest('[data-testid]')) {
+                continue;
+            }
+
+            const tag = element.tagName.toLowerCase();
+            const role = element.getAttribute('role') || '';
+            const isInteractive =
+                interactive.split(',').includes(tag) || roles.has(role) || element.tabIndex >= 0;
+            // A button often holds its label in a child span, so interactive
+            // elements read their whole text; a container would read the page.
+            const text = (
+                (isInteractive ? element.innerText || '' : ownText(element)) ||
+                attributeLabel(element)
+            )
+                .replace(/\\s+/g, ' ')
+                .trim()
+                .slice(0, 40);
+
+            if (!testId && !text) {
+                continue;
+            }
+
+            rows.push({
+                testId,
+                tag,
+                role: role || (isInteractive ? tag : ''),
+                text,
+                belowFold: rect.top >= window.innerHeight || rect.bottom <= 0,
+            });
+        }
+
+        return rows;
+        `,
+        [limit, skip]
+    );
+
+    return Array.isArray(outline) ? outline : [];
+}
+
+/**
  * Walks every settings section once so the plan can only target ids that the
  * build really renders.
  */
-export async function collectSettingsOutline(session) {
+export async function collectSettingsOutline(session, elements = {}) {
     const navIds = (await collectTestIds(session)).filter((id) => id.startsWith('settings-nav-'));
     const sections = new Set();
     const testIds = new Set();
+    const seen = new Set();
 
     for (const id of navIds) {
         try {
@@ -165,12 +268,20 @@ export async function collectSettingsOutline(session) {
             for (const section of await collectSettingsSections(session)) {
                 sections.add(section);
             }
+
+            elements[id] = await collectOutline(session, 40, [...seen]);
+
+            for (const row of elements[id]) {
+                if (row.testId) {
+                    seen.add(row.testId);
+                }
+            }
         } catch {
             // A section that cannot be opened is simply not offered to the plan.
         }
     }
 
-    return { navIds, sections: [...sections].sort(), testIds: [...testIds].sort() };
+    return { navIds, sections: [...sections].sort(), testIds: [...testIds].sort(), elements };
 }
 
 export async function measureOverflow(session) {
@@ -193,4 +304,36 @@ export async function measureOverflow(session) {
         innerHeight: Number(result?.innerHeight ?? 0),
         overflowX,
     };
+}
+
+/**
+ * Puts the settings content back at the top.
+ *
+ * The sections share one scroll container, so scrolling the shortcut list and
+ * then opening another section left that section mid-page: its title and its
+ * first control were above the viewport, in the video and in every screenshot.
+ */
+export async function resetContentScroll(session) {
+    try {
+        await session.execute(`
+            const root = document.querySelector('[data-testid="settings-view"]');
+            if (!root) {
+                return false;
+            }
+            const scrollers = [root, ...root.querySelectorAll('*')].filter((element) => {
+                const style = getComputedStyle(element);
+                return (
+                    ['auto', 'scroll'].includes(style.overflowY) &&
+                    element.scrollHeight - element.clientHeight > 80
+                );
+            });
+            for (const element of scrollers) {
+                element.scrollTop = 0;
+            }
+            window.scrollTo(0, 0);
+            return true;
+        `);
+    } catch {
+        // A window that is closing has no scroll state to reset.
+    }
 }

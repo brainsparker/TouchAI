@@ -9,10 +9,11 @@ not install the workspace to run them.
 | File | Job | Purpose |
 | --- | --- | --- |
 | `detect.mjs` | `detect` | Decide, comment, emit outputs |
-| `explore.mjs` | `explore` | Build facts: test ids, sections, overflow, locale parity |
+| `explore.mjs` | `explore` | Build facts: test ids, element outline, sections, overflow, locale parity |
 | `plan.mjs` | `plan` | Model call and plan validation |
+| `seed.mjs` | `record` | Fixture usage data for the throwaway app root |
 | `record.mjs` | `record` | Execute the plan, capture screenshots and mp4 |
-| `publish.mjs` | `publish` | Validate evidence, upload, update the comment |
+| `publish.mjs` | `publish` | Validate evidence, scan for credentials, upload, update the comment |
 | `doctor.mjs` | manual | Preflight the credentials |
 | `with-display.sh` | `explore`, `record` | Window manager and compositor for Xvfb |
 

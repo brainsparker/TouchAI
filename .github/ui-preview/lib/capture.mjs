@@ -184,6 +184,88 @@ export function showWindow(display, id) {
     run('xdotool', ['windowmap', id], { env: { ...process.env, DISPLAY: display } });
 }
 
+export function pngSize(file) {
+    let buffer;
+
+    try {
+        const descriptor = fs.openSync(file, 'r');
+        buffer = Buffer.alloc(24);
+        fs.readSync(descriptor, buffer, 0, 24, 0);
+        fs.closeSync(descriptor);
+    } catch {
+        return null;
+    }
+
+    if (buffer.length < 24 || buffer.toString('ascii', 1, 4) !== 'PNG') {
+        return null;
+    }
+
+    return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
+}
+
+/**
+ * Crops a window screenshot to one element plus some room around it.
+ *
+ * The element rect is in CSS pixels and the PNG is in device pixels, so the
+ * rect is scaled by the ratio between the two. A crop that would be tiny (a
+ * switch, an icon) keeps a minimum size, because a control shown without the
+ * label beside it tells a reviewer nothing.
+ */
+export function cropToElement({
+    file,
+    rect,
+    viewport,
+    padding = 48,
+    minWidth = 560,
+    minHeight = 340,
+}) {
+    const size = pngSize(file);
+
+    if (!size || !viewport?.width || !viewport?.height) {
+        return null;
+    }
+
+    const scaleX = size.width / viewport.width;
+    const scaleY = size.height / viewport.height;
+    const wanted = {
+        width: Math.min(
+            size.width,
+            Math.max(minWidth, Math.round((rect.width + padding * 2) * scaleX))
+        ),
+        height: Math.min(
+            size.height,
+            Math.max(minHeight, Math.round((rect.height + padding * 2) * scaleY))
+        ),
+    };
+    const centerX = (rect.x + rect.width / 2) * scaleX;
+    const centerY = (rect.y + rect.height / 2) * scaleY;
+    const x = Math.max(
+        0,
+        Math.min(size.width - wanted.width, Math.round(centerX - wanted.width / 2))
+    );
+    const y = Math.max(
+        0,
+        Math.min(size.height - wanted.height, Math.round(centerY - wanted.height / 2))
+    );
+    const scratch = `${file}.crop.png`;
+    const convert = hasCommand('magick') ? 'magick' : 'convert';
+    const result = run(convert, [
+        file,
+        '-crop',
+        `${wanted.width}x${wanted.height}+${x}+${y}`,
+        '+repage',
+        scratch,
+    ]);
+
+    if (result.status !== 0 || !fs.existsSync(scratch)) {
+        fs.rmSync(scratch, { force: true });
+        return null;
+    }
+
+    fs.renameSync(scratch, file);
+    return wanted;
+}
+
 /**
  * Captures one window.
  *

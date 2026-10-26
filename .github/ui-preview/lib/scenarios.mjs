@@ -164,6 +164,7 @@ export function validatePlan(plan, facts = {}) {
                 return;
             }
 
+            const known = testIds[scene.surface] ?? [];
             const needsTarget = ['click', 'hover', 'type'].includes(step.do);
 
             if (needsTarget) {
@@ -173,8 +174,6 @@ export function validatePlan(plan, facts = {}) {
                 }
 
                 const testId = testIdFromSelector(step.target);
-                const known = testIds[scene.surface] ?? [];
-
                 if (!testId) {
                     errors.push(`${stepLabel} must target a data-testid`);
                     return;
@@ -238,6 +237,22 @@ export function validatePlan(plan, facts = {}) {
                         `${stepLabel} needs a shot name of lowercase letters, digits, and dashes`
                     );
                     return;
+                }
+
+                if (step.target != null) {
+                    const testId = testIdFromSelector(step.target);
+
+                    if (!singleLine(step.target, LIMITS.selectorLength) || !testId) {
+                        errors.push(`${stepLabel} must target a data-testid to crop to`);
+                        return;
+                    }
+
+                    if (!known.includes(testId)) {
+                        errors.push(
+                            `${stepLabel} targets a test id that this build does not render`
+                        );
+                        return;
+                    }
                 }
 
                 shotCount += 1;

@@ -98,6 +98,23 @@ describe('user reads the preview comment', () => {
 
         expect(body).toContain('Locale key parity (**fail**): missing in en-US: a.b');
     });
+
+    it('user sees which steps did not run, collapsed below the media', () => {
+        const body = buildPreviewComment({
+            ...baseComment,
+            skippedSteps: [
+                {
+                    scene: 'Shortcuts',
+                    step: "click [data-testid='settings-nav-usage']",
+                    error: 'element was not visible',
+                },
+            ],
+        });
+
+        expect(body).toContain('<details><summary>1 step(s) did not run</summary>');
+        expect(body).toContain('Shortcuts: click');
+        expect(body).toContain('element was not visible');
+    });
 });
 
 describe('user reads the waiting and skipped comments', () => {

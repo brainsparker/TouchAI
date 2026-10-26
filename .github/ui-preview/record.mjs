@@ -10,6 +10,7 @@
  * window instead of covering it.
  */
 
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -17,6 +18,7 @@ import {
     burnCaptions,
     captureScreenshot,
     countDistinctStates,
+    cropToElement,
     ensureDir,
     hideWindow,
     listAppWindows,
@@ -24,13 +26,14 @@ import {
     paintDesktop,
     probeVideo,
     raiseWindow,
+    SCREEN_WIDTH,
     showWindow,
     STAGE_TOP,
     startRecording,
     windowForSurface,
     windowGeometry,
 } from './lib/capture.mjs';
-import { ELEMENT_CENTER_SCRIPT } from './lib/overlay.mjs';
+import { ELEMENT_CENTER_SCRIPT, ELEMENT_ROW_RECT_SCRIPT } from './lib/overlay.mjs';
 import {
     boot,
     bridge,
@@ -38,6 +41,7 @@ import {
     mainWindowHandle,
     measureOverflow,
     openSettings,
+    resetContentScroll,
     switchToSurface,
     waitForBridge,
 } from './lib/runtime.mjs';
@@ -208,6 +212,35 @@ function describeStep(step) {
 }
 
 /**
+ * Puts the active window back on the stage line.
+ *
+ * The search window grows from 60 to 207 pixels tall when results appear and
+ * the app recentres itself, which slides it to the middle of the screen
+ * mid-clip. Re-pinning it after each step keeps the recording steady.
+ */
+async function keepWindowInPlace(display, surface, state) {
+    const id = state.windows?.[surface];
+
+    if (!id) {
+        return;
+    }
+
+    const geometry = windowGeometry(display, id);
+
+    if (!geometry || Math.abs(geometry.y - STAGE_TOP) <= 2) {
+        return;
+    }
+
+    moveWindow(
+        display,
+        id,
+        Math.max(0, Math.round((SCREEN_WIDTH - geometry.width) / 2)),
+        STAGE_TOP
+    );
+    await sleep(120);
+}
+
+/**
  * A window that was just remapped can return a black frame. Capture again when
  * the file is implausibly small for a real window.
  */
@@ -296,6 +329,95 @@ async function runStep(session, step) {
     }
 }
 
+/**
+ * One repair attempt after a step failed.
+ *
+ * The driver can time out on a click that the page would accept, and the
+ * recorder has no model key by design, so the repair is a retry plus a DOM
+ * fallback rather than a new plan. A step that still fails is skipped and
+ * reported, never silently counted as done.
+ */
+async function recoverStep(session, step) {
+    try {
+        await ensureOverlay(session);
+        await sleep(400);
+    } catch {
+        // The window may be mid-navigation; the retry below still runs.
+    }
+
+    if (step.do === 'click') {
+        try {
+            // A short wait: the first attempt already gave the page 15 s, so a
+            // second long wait only stretches the video.
+            await session.click(step.target, { timeoutMs: 3000 });
+            return 'retried the click';
+        } catch {
+            // Fall through to the DOM click.
+        }
+
+        try {
+            const clicked = await session.execute(
+                `
+                const element = document.querySelector(arguments[0]);
+                if (!element) {
+                    return false;
+                }
+                element.click();
+                return true;
+                `,
+                [step.target]
+            );
+
+            if (clicked) {
+                return 'clicked through the DOM';
+            }
+        } catch {
+            // The step is reported as skipped.
+        }
+    }
+
+    if (step.do === 'type') {
+        try {
+            await session.click(step.target);
+            await session.appendText(step.target, String(step.value ?? ''));
+            return 'typed again';
+        } catch {
+            // The step is reported as skipped.
+        }
+    }
+
+    if (step.do === 'hover') {
+        try {
+            await session.execute(
+                `
+                const element = document.querySelector(arguments[0]);
+                if (!element) {
+                    return false;
+                }
+                element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+                element.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+                return true;
+                `,
+                [step.target]
+            );
+            return 'hovered through the DOM';
+        } catch {
+            // The step is reported as skipped.
+        }
+    }
+
+    if (step.do === 'scroll') {
+        try {
+            await session.scroll(Number(step.value));
+            return 'scrolled the window';
+        } catch {
+            // The step is reported as skipped.
+        }
+    }
+
+    return null;
+}
+
 function findLogErrors(appRoot) {
     const errors = [];
 
@@ -342,6 +464,38 @@ function findLogErrors(appRoot) {
     return errors.slice(0, 20);
 }
 
+/**
+ * Boots the app once so it creates and migrates its database, quits, then
+ * writes fixture rows into it. A fresh install records an empty Usage page,
+ * which hides exactly the changes that page needs a reviewer to see.
+ */
+async function seedAppData(application) {
+    const warm = await boot({ application });
+
+    try {
+        await waitForBridge(warm.session, 45000);
+    } finally {
+        await warm.close();
+    }
+
+    // The driver port is released asynchronously; the real boot starts after.
+    await sleep(800);
+
+    const result = spawnSync(
+        process.execPath,
+        ['--experimental-sqlite', path.join(import.meta.dirname, 'seed.mjs')],
+        { encoding: 'utf8', env: process.env, timeout: 120000 }
+    );
+
+    if (result.status !== 0) {
+        throw new Error(
+            `seed failed: ${(result.stderr || result.stdout || result.error?.message || '').slice(0, 500)}`
+        );
+    }
+
+    console.log(result.stdout.trim());
+}
+
 async function main() {
     const application = env('UI_PREVIEW_APP_BINARY');
     const outDir = path.resolve(env('UI_PREVIEW_OUT', 'ui-preview-out'));
@@ -351,7 +505,8 @@ async function main() {
     const title = env('UI_PREVIEW_TITLE');
     const appRoot = env('TOUCHAI_APP_ROOT');
     const facts = JSON.parse(fs.readFileSync(path.join(outDir, 'facts.json'), 'utf8'));
-    const plan = JSON.parse(fs.readFileSync(path.join(outDir, 'plan.json'), 'utf8'));
+    const planFile = env('UI_PREVIEW_PLAN_FILE') || path.join(outDir, 'plan.json');
+    const plan = JSON.parse(fs.readFileSync(planFile, 'utf8'));
 
     if (!application || !fs.existsSync(application)) {
         throw new Error(`UI_PREVIEW_APP_BINARY does not exist: ${application}`);
@@ -379,10 +534,21 @@ async function main() {
         warnings: plan.warnings ?? [],
         scenes: [],
         checks: [],
+        errors: [],
+        skippedSteps: [],
         video: null,
         videoInfo: null,
         failure: null,
     };
+
+    if (env('UI_PREVIEW_SEED', '1') === '1') {
+        try {
+            await seedAppData(application);
+        } catch (error) {
+            manifest.warnings.push(`fixture data was not written: ${error.message}`);
+            console.log(`seed skipped: ${error.message}`);
+        }
+    }
 
     const runtime = await boot({ application });
     const { session } = runtime;
@@ -460,6 +626,20 @@ async function main() {
                 await session.switchTo(handle);
                 await ensureOverlay(session);
                 await waitForPaint(session);
+                if (env('UI_PREVIEW_DEBUG') === '1') {
+                    console.log(
+                        `debug ${scene.surface}:`,
+                        listAppWindows(display)
+                            .map((id) => {
+                                const geometry = windowGeometry(display, id);
+                                return `${id}:${geometry?.width}x${geometry?.height}@${geometry?.x},${geometry?.y}`;
+                            })
+                            .join(' '),
+                        'state:',
+                        JSON.stringify(state.windows)
+                    );
+                }
+                await resetContentScroll(session);
                 mark(scene.title);
                 await sleep(400);
 
@@ -501,47 +681,104 @@ async function main() {
                     }
 
                     if (step.do === 'shot') {
-                        await sleep(200);
-                        await isolateSurface(display, scene.surface, state);
-                        const file = `${scene.surface}-${step.name}.png`;
+                        try {
+                            await sleep(200);
+                            await isolateSurface(display, scene.surface, state);
+                            const file = `${scene.surface}-${step.name}.png`;
 
-                        if (!state.windows?.[scene.surface]) {
-                            throw new Error(`no visible ${scene.surface} window to capture`);
+                            if (!state.windows?.[scene.surface]) {
+                                throw new Error(`no visible ${scene.surface} window to capture`);
+                            }
+
+                            // A shot may name an element: the reviewer then sees
+                            // the control and the label beside it, not the whole
+                            // window scaled down.
+                            const element = step.target
+                                ? await session.execute(ELEMENT_ROW_RECT_SCRIPT, [step.target])
+                                : null;
+
+                            raiseWindow(display, state.windows[scene.surface]);
+                            await sleep(250);
+                            // The overlay helps the video, but it must not cover
+                            // the pixels a reviewer judges in a still.
+                            let size = await captureStill({
+                                session,
+                                display,
+                                file: path.join(evidenceDir, file),
+                                surface: scene.surface,
+                                state,
+                            });
+
+                            if (!size) {
+                                throw new Error(
+                                    `the ${scene.surface} window did not paint a frame`
+                                );
+                            }
+
+                            if (element) {
+                                size =
+                                    cropToElement({
+                                        file: path.join(evidenceDir, file),
+                                        rect: element.rect,
+                                        viewport: element.viewport,
+                                    }) ?? size;
+                            }
+
+                            recorded.shots.push({
+                                file,
+                                caption: step.caption ?? '',
+                                width: size.width,
+                                height: size.height,
+                            });
+                        } catch (error) {
+                            manifest.skippedSteps.push({
+                                scene: scene.title,
+                                step: `shot ${step.name}`,
+                                error: error.message,
+                            });
+                            console.log(`shot skipped: ${error.message}`);
                         }
-
-                        raiseWindow(display, state.windows[scene.surface]);
-                        await sleep(250);
-                        // The overlay helps the video, but it must not cover the
-                        // pixels a reviewer judges in a still.
-                        const size = await captureStill({
-                            session,
-                            display,
-                            file: path.join(evidenceDir, file),
-                            surface: scene.surface,
-                            state,
-                        });
-
-                        if (!size) {
-                            throw new Error(`the ${scene.surface} window did not paint a frame`);
-                        }
-
-                        recorded.shots.push({
-                            file,
-                            caption: step.caption ?? '',
-                            width: size.width,
-                            height: size.height,
-                        });
                         continue;
                     }
 
-                    await runStep(session, step);
+                    try {
+                        await runStep(session, step);
+                        await keepWindowInPlace(display, scene.surface, state);
+
+                        // Sections share one scroll container: a section opened
+                        // after a scroll would otherwise start mid-page.
+                        if (
+                            step.do === 'click' &&
+                            String(step.target ?? '').includes('settings-nav-')
+                        ) {
+                            await resetContentScroll(session);
+                            await waitForPaint(session);
+                        }
+                    } catch (error) {
+                        const repaired = await recoverStep(session, step);
+
+                        if (repaired) {
+                            console.log(`step repaired (${repaired}): ${currentStep}`);
+                        } else {
+                            manifest.skippedSteps.push({
+                                scene: scene.title,
+                                step: currentStep,
+                                error: error.message,
+                            });
+                            console.log(`step skipped: ${currentStep}: ${error.message}`);
+                        }
+                    }
                 }
             } catch (error) {
-                manifest.failure = {
-                    step: `${scene.title}: ${currentStep}`,
-                    message: error.message,
-                };
-                break;
+                // One scene that cannot start must not throw away the scenes
+                // after it, or the screenshots they would have produced.
+                manifest.errors.push(`${scene.title} at ${currentStep}: ${error.message}`);
+                manifest.skippedSteps.push({
+                    scene: scene.title,
+                    step: currentStep,
+                    error: error.message,
+                });
+                console.log(`scene skipped: ${scene.title}: ${error.message}`);
             }
         }
 
@@ -644,6 +881,14 @@ async function main() {
             detail: `${shots.length} shot(s)`,
         },
         {
+            name: 'Steps executed',
+            status: manifest.skippedSteps.length === 0 ? 'pass' : 'fail',
+            detail:
+                manifest.skippedSteps.length === 0
+                    ? ''
+                    : `${manifest.skippedSteps.length} step(s) did not run`,
+        },
+        {
             name: 'Recording captured',
             status: manifest.video ? 'pass' : 'not checked',
             detail: manifest.video ? '' : 'ffmpeg did not produce a usable mp4',
@@ -666,6 +911,13 @@ async function main() {
             status: facts.i18nParity.ok ? 'pass' : 'fail',
             detail: facts.i18nParity.detail,
         });
+    }
+
+    if (!manifest.failure && shots.length === 0) {
+        manifest.failure = {
+            step: 'recording',
+            message: 'no screenshot was captured, so there is nothing to review',
+        };
     }
 
     fs.writeFileSync(

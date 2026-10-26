@@ -20,6 +20,7 @@ import {
 import { checkLocaleParity } from './lib/i18n.mjs';
 import {
     boot,
+    collectOutline,
     collectSettingsOutline,
     collectTestIds,
     ensureOverlay,
@@ -87,10 +88,12 @@ async function main() {
         await ensureOverlay(session);
 
         const searchTestIds = await collectTestIds(session);
+        const searchOutline = await collectOutline(session, 40);
         const searchOverflow = await measureOverflow(session);
 
+        const settingsElements = {};
         const { settings } = await openSettings(session);
-        const settingsOutline = await collectSettingsOutline(session);
+        const settingsOutline = await collectSettingsOutline(session, settingsElements);
         await session.switchTo(settings);
         const settingsOverflow = await measureOverflow(session);
 
@@ -113,6 +116,10 @@ async function main() {
             },
             settingsSections: settingsOutline.sections,
             settingsNavIds: settingsOutline.navIds,
+            elements: {
+                search: searchOutline,
+                settings: settingsElements,
+            },
             overflow: {
                 search: searchOverflow,
                 settings: settingsOverflow,

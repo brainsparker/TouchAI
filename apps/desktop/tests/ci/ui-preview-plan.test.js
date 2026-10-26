@@ -188,3 +188,55 @@ describe('user targets an element by test id', () => {
         expect(testIdFromSelector("[data-testid='a'] .child")).toBeNull();
     });
 });
+
+describe('user asks for a cropped screenshot', () => {
+    const steps = [
+        { do: 'click', target: "[data-testid='settings-nav-shortcuts']" },
+        { do: 'click', target: "[data-testid='settings-nav-search']" },
+        { do: 'click', target: "[data-testid='settings-nav-shortcuts']" },
+        { do: 'click', target: "[data-testid='settings-nav-search']" },
+        { do: 'click', target: "[data-testid='settings-nav-shortcuts']" },
+        { do: 'click', target: "[data-testid='settings-nav-search']" },
+        {
+            do: 'shot',
+            name: 'shortcuts',
+            target: "[data-testid='settings-shortcuts-section']",
+        },
+        { do: 'shot', name: 'search', target: "[data-testid='settings-nav-search']" },
+        { do: 'shot', name: 'general' },
+    ];
+
+    it('user gets a shot cropped to a test id that the build renders', () => {
+        expect(validatePlan(planWithSteps(steps), facts).ok).toBe(true);
+    });
+
+    it('user gets a rejection when the shot targets an id the build never rendered', () => {
+        const result = validatePlan(
+            planWithSteps(
+                steps.map((step) =>
+                    step.name === 'shortcuts'
+                        ? { ...step, target: "[data-testid='settings-missing-section']" }
+                        : step
+                )
+            ),
+            facts
+        );
+
+        expect(result.ok).toBe(false);
+        expect(result.errors.join(' ')).toContain('this build does not render');
+    });
+
+    it('user gets a rejection when the shot target is not a test id', () => {
+        const result = validatePlan(
+            planWithSteps(
+                steps.map((step) =>
+                    step.name === 'shortcuts' ? { ...step, target: '.settings-section' } : step
+                )
+            ),
+            facts
+        );
+
+        expect(result.ok).toBe(false);
+        expect(result.errors.join(' ')).toContain('must target a data-testid');
+    });
+});

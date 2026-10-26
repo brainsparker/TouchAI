@@ -167,8 +167,8 @@ export class Session {
         );
     }
 
-    async click(selector) {
-        const elementId = await this.waitForElement(selector);
+    async click(selector, { timeoutMs = 15000 } = {}) {
+        const elementId = await this.waitForElement(selector, timeoutMs);
         await this.call(`/element/${elementId}/click`);
     }
 

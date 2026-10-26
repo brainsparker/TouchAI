@@ -62,21 +62,35 @@ pull-request code.
 
 ```text
 detect   decide, comment, output pr/sha
-explore  build once, boot under Xvfb, collect test ids and locale parity
-plan     diff + outline -> validated JSON scene plan
-record   run the plan, capture screenshots and mp4
+explore  build once, boot under Xvfb, collect test ids, an element outline, locale parity
+plan     interface-only diff + outline -> validated JSON scene plan
+record   seed fixture data, run the plan, capture screenshots and mp4
 publish  validate evidence, upload assets, update the comment
 ```
 
-The model sees the diff, the description, and the test ids. Its answer is data: every action is
-allowlisted, every click target must be a `data-testid` the build actually rendered, and every
-string has a length cap. When the model is unavailable or its plan is rejected, a deterministic
-plan for the changed surfaces is used instead, and the comment names the fallback.
+The model sees the diff of the interface files only, the description, the test ids, and an outline
+of the rendered elements (test id, role, own text, below the fold). The diff is split per file
+before it is cut, so a large pull request cannot push the interface files out of the window. Its
+answer is data: every action is allowlisted, every click target must be a `data-testid` the build
+actually rendered, and every string has a length cap. When the model is unavailable or its plan is
+rejected, a deterministic plan for the changed surfaces is used instead.
 
 A plan that only opens a window and takes one screenshot is rejected. Every scene needs at least
 three interactions, the whole plan needs at least six interactions and three screenshots, and the
 fallback plan types a query character by character, walks settings sections, toggles a control, and
 scrolls a long list.
+
+## Fixture data
+
+A fresh install has no requests, so the Usage page records as a row of zeros and the model list is
+empty. `record.mjs` boots the app once to create its database, quits, and runs `seed.mjs` against
+`$TOUCHAI_APP_ROOT/data/touchai.db` before the recording boot.
+
+`seed.mjs` inserts one provider, two models, six sessions, and about ninety turns over thirty days,
+then rebuilds the daily rollups. It only inserts rows into existing tables: no schema change, no
+migration, and nothing outside the throwaway app root. The sequence is fixed, so the same pull
+request records the same numbers twice. A seeding failure is a warning in the manifest, not a
+failed recording.
 
 ## Recording quality
 
@@ -87,16 +101,34 @@ The recording must show a flow, not a still image with a duration.
   scene.
 - The active window is moved below the title and the inactive window is unmapped. The search
   window hides itself when it loses focus, so position alone is not enough.
+- The window is re-pinned after every step: the search window grows when results appear and the
+  app recentres itself, which would otherwise slide it to the middle of the screen mid-clip.
+- Opening a settings section resets the shared content scroll, so a section opened after a scroll
+  does not start mid-page.
 - ffmpeg captures at 10 fps and writes a constant 30 fps stream. Capturing 30 fps on a shared
   runner dropped most frames and produced a video much shorter than the session.
 - Step captions are burned into a strip below the window, not drawn over the UI.
+- The cursor draws a fading trail and a ring on each click, so a viewer can follow the path.
+- A `shot` may name a `data-testid`; that screenshot is cropped to the element with room around it
+  and a minimum size, instead of shrinking the whole window.
 - Screenshots are captured by window id. Cropping the root by an earlier geometry produced black
   frames when the app recentred itself after a resize.
+
+## When a step fails
+
+The recorder retries a failed step once and falls back to a DOM click, a DOM hover, or a window
+scroll. A step that still fails is skipped, the rest of the scene and the following scenes still
+run, and the comment lists every skipped step in a collapsed block. The recorder has no model key,
+so it cannot ask for a new plan mid-run; a maintainer can pass one with the `plan_json` input of a
+manual run.
 
 Publishing re-checks the numbers and fails closed. A recording must be at least 6 seconds, at least
 60 frames, at least 5 distinct visual states, and cover at least 80% of the recording session. A
 missing `videoInfo` block is an error, not a pass. This is what stops a one-frame mp4 from being
 published as evidence.
+
+Publishing also refuses evidence that contains something shaped like a credential, and posts a
+comment saying that nothing was published.
 
 ## Credentials
 

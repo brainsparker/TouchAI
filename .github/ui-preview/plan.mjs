@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { selectUiDiff } from './lib/diff.mjs';
 import { createClient } from './lib/github.mjs';
 import { buildPrompt, requestPlan } from './lib/model.mjs';
 import { defaultPlan, validatePlan } from './lib/scenarios.mjs';
@@ -32,19 +33,44 @@ async function main() {
     const client = createClient({ token, owner, repo });
     const pull = await client.getPullRequest(pr);
     const diff = await client.getDiff(pr);
+    const uiDiff = selectUiDiff(diff);
 
     const prompt = buildPrompt({
         title: pull.title,
         body: pull.body,
         files: facts.files,
-        diff,
+        diff: uiDiff.text,
+        diffFiles: uiDiff.files,
+        diffDropped: uiDiff.dropped,
         outline: facts,
     });
 
     let plan = null;
     const warnings = [];
 
-    if (env('UI_PREVIEW_MODEL_API_KEY') && env('UI_PREVIEW_MODEL')) {
+    const manual = env('UI_PREVIEW_PLAN_JSON');
+
+    if (manual) {
+        try {
+            const parsed = JSON.parse(manual);
+            const validation = validatePlan(parsed, {
+                testIds: facts.testIds,
+                surfaces: ['search', 'settings'],
+            });
+
+            if (validation.ok) {
+                plan = { ...validation.plan, source: 'manual' };
+            } else {
+                warnings.push(
+                    `the supplied plan was rejected: ${validation.errors.slice(0, 5).join('; ')}`
+                );
+            }
+        } catch (error) {
+            warnings.push(`the supplied plan is not JSON: ${error.message}`);
+        }
+    }
+
+    if (!plan && env('UI_PREVIEW_MODEL_API_KEY') && env('UI_PREVIEW_MODEL')) {
         const response = await requestPlan({
             baseUrl: env('UI_PREVIEW_MODEL_BASE_URL', 'https://qai.qianc.top/v1'),
             apiKey: env('UI_PREVIEW_MODEL_API_KEY'),
@@ -68,7 +94,7 @@ async function main() {
                 );
             }
         }
-    } else {
+    } else if (!plan) {
         warnings.push('no model is configured; the default scene was used');
     }
 
