@@ -4,18 +4,31 @@
  * Runs pull-request code (the built binary) with no repository secret and no
  * write token. A failed step is written to the manifest and published as a
  * failure, never retried into a pass.
+ *
+ * The recording starts only after the first surface is painted, so the video
+ * has no black lead-in, and the step captions are burned in below the app
+ * window instead of covering it.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 
 import {
+    burnCaptions,
     captureScreenshot,
+    countDistinctStates,
     ensureDir,
+    hideWindow,
+    listAppWindows,
+    moveWindow,
     paintDesktop,
+    probeVideo,
     raiseWindow,
+    showWindow,
+    STAGE_TOP,
     startRecording,
     windowForSurface,
+    windowGeometry,
 } from './lib/capture.mjs';
 import { ELEMENT_CENTER_SCRIPT } from './lib/overlay.mjs';
 import {
@@ -28,6 +41,13 @@ import {
     switchToSurface,
     waitForBridge,
 } from './lib/runtime.mjs';
+import { testIdFromSelector } from './lib/scenarios.mjs';
+import {
+    MIN_COVERAGE,
+    MIN_DISTINCT_STATES,
+    MIN_VIDEO_FRAMES,
+    MIN_VIDEO_SECONDS,
+} from './lib/video-limits.mjs';
 
 function env(name, fallback = '') {
     return process.env[name] ?? fallback;
@@ -37,7 +57,16 @@ function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function moveCursor(session, selector, caption) {
+async function waitForPaint(session) {
+    // A timeout rather than requestAnimationFrame: a window that was just
+    // remapped can have its frame callbacks paused, which would hang the driver.
+    await session.executeAsync(`
+        const done = arguments[arguments.length - 1];
+        setTimeout(() => done(true), 120);
+    `);
+}
+
+async function moveCursor(session, selector) {
     const center = await session.execute(ELEMENT_CENTER_SCRIPT, [selector]);
 
     if (!center) {
@@ -48,14 +77,10 @@ async function moveCursor(session, selector, caption) {
         center.x,
         center.y,
     ]);
-
-    if (caption) {
-        await session.execute('window.__UI_PREVIEW__?.caption(arguments[0]);', [caption]);
-    }
 }
 
-async function clickWithOverlay(session, selector, caption) {
-    await moveCursor(session, selector, caption);
+async function clickWithOverlay(session, selector) {
+    await moveCursor(session, selector);
     await sleep(260);
     await session.execute(
         `
@@ -70,11 +95,155 @@ async function clickWithOverlay(session, selector, caption) {
     await sleep(350);
 }
 
-async function runStep(session, step) {
-    if (step.caption) {
-        await session.execute('window.__UI_PREVIEW__?.caption(arguments[0]);', [step.caption]);
+async function typeSlowly(session, selector, value) {
+    await moveCursor(session, selector);
+    await session.click(selector);
+    await sleep(180);
+
+    for (const character of [...String(value)]) {
+        await session.appendText(selector, character);
+        await sleep(70);
     }
 
+    await sleep(300);
+}
+
+async function scrollContent(session, pixels) {
+    const moved = await session.execute(
+        `
+        const amount = Number(arguments[0]) || 0;
+        const root = document.querySelector('[data-testid="settings-view"]') || document.body;
+        const candidates = [root, ...root.querySelectorAll('*')].filter((element) => {
+            const style = getComputedStyle(element);
+            const scrollable = ['auto', 'scroll'].includes(style.overflowY);
+            return scrollable && element.scrollHeight - element.clientHeight > 80;
+        });
+        const target = candidates.sort(
+            (left, right) =>
+                right.scrollHeight - right.clientHeight - (left.scrollHeight - left.clientHeight)
+        )[0];
+
+        if (!target) {
+            return false;
+        }
+
+        target.scrollBy({ top: amount, behavior: 'smooth' });
+        return true;
+        `,
+        [pixels]
+    );
+    await sleep(500);
+
+    if (!moved) {
+        await session.scroll(pixels);
+        await sleep(500);
+    }
+}
+
+/**
+ * Shows only the window for this surface. Without this the search window stayed
+ * on top of the settings window and the video showed both at once.
+ */
+async function isolateSurface(display, surface, state) {
+    state.windows ??= {};
+
+    let target = null;
+
+    if (state.windows[surface]) {
+        showWindow(display, state.windows[surface]);
+        await sleep(250);
+        target = windowGeometry(display, state.windows[surface]);
+    }
+
+    target ??= windowForSurface(display, surface);
+
+    if (!target) {
+        return null;
+    }
+
+    state.windows[surface] = target.id;
+
+    // The search window hides itself when it loses focus, so the inactive
+    // window is unmapped rather than just covered.
+    for (const id of listAppWindows(display)) {
+        if (id !== target.id) {
+            hideWindow(display, id);
+        }
+    }
+
+    showWindow(display, target.id);
+    moveWindow(display, target.id, Math.max(0, Math.round((1280 - target.width) / 2)), STAGE_TOP);
+    raiseWindow(display, target.id);
+    await sleep(250);
+    return target;
+}
+
+function describeStep(step) {
+    if (step.caption) {
+        return step.caption;
+    }
+
+    if (step.do === 'bridge') {
+        return step.value === 'openSettingsWindow' ? 'Open Settings' : `Run ${step.value}`;
+    }
+
+    if (step.do === 'click' || step.do === 'hover') {
+        const id = testIdFromSelector(step.target) ?? step.target;
+        return `${step.do === 'click' ? 'Click' : 'Hover'} ${id}`;
+    }
+
+    if (step.do === 'type') {
+        return `Type "${step.value}"`;
+    }
+
+    if (step.do === 'press') {
+        return `Press ${step.value}`;
+    }
+
+    if (step.do === 'scroll') {
+        return `Scroll ${step.value}px`;
+    }
+
+    return '';
+}
+
+/**
+ * A window that was just remapped can return a black frame. Capture again when
+ * the file is implausibly small for a real window.
+ */
+async function captureStill({ session, display, surface, state, file }) {
+    const candidates = [state.windows?.[surface], windowForSurface(display, surface)?.id].filter(
+        Boolean
+    );
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+        await session.execute('window.__UI_PREVIEW__?.hide();');
+        await sleep(250);
+
+        let size = null;
+
+        for (const id of candidates) {
+            size = captureScreenshot({ display, file, id });
+
+            if (fs.existsSync(file) && fs.statSync(file).size >= 4096) {
+                break;
+            }
+        }
+
+        await session.execute('window.__UI_PREVIEW__?.show();');
+        await sleep(250);
+
+        if (fs.statSync(file).size >= 4096) {
+            return size;
+        }
+
+        await waitForPaint(session);
+    }
+
+    return null;
+}
+
+async function runStep(session, step) {
     if (step.do === 'bridge') {
         await bridge(session, step.value, step.args ?? []);
         await sleep(400);
@@ -82,21 +251,32 @@ async function runStep(session, step) {
     }
 
     if (step.do === 'click') {
-        await clickWithOverlay(session, step.target, step.caption);
+        await clickWithOverlay(session, step.target);
         return;
     }
 
     if (step.do === 'hover') {
-        await moveCursor(session, step.target, step.caption);
-        await session.hover(step.target);
+        await moveCursor(session, step.target);
+        try {
+            await session.hover(step.target);
+        } catch {
+            // WebKitGTK can time out on pointer actions; the caption and the
+            // cursor already show the intent, so the step is not fatal.
+            await session.execute(
+                `
+                const element = document.querySelector(arguments[0]);
+                element?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+                element?.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+                `,
+                [step.target]
+            );
+        }
         await sleep(400);
         return;
     }
 
     if (step.do === 'type') {
-        await moveCursor(session, step.target, step.caption);
-        await session.type(step.target, step.value);
-        await sleep(350);
+        await typeSlowly(session, step.target, step.value);
         return;
     }
 
@@ -107,18 +287,12 @@ async function runStep(session, step) {
     }
 
     if (step.do === 'scroll') {
-        await session.scroll(step.value);
-        await sleep(400);
+        await scrollContent(session, Number(step.value));
         return;
     }
 
     if (step.do === 'wait') {
         await sleep(Number(step.value));
-        return;
-    }
-
-    if (step.do === 'shot') {
-        await sleep(260);
     }
 }
 
@@ -174,6 +348,7 @@ async function main() {
     const evidenceDir = ensureDir(path.join(outDir, 'evidence'));
     const display = env('DISPLAY', ':99');
     const sha = env('UI_PREVIEW_SHA');
+    const title = env('UI_PREVIEW_TITLE');
     const appRoot = env('TOUCHAI_APP_ROOT');
     const facts = JSON.parse(fs.readFileSync(path.join(outDir, 'facts.json'), 'utf8'));
     const plan = JSON.parse(fs.readFileSync(path.join(outDir, 'plan.json'), 'utf8'));
@@ -205,60 +380,140 @@ async function main() {
         scenes: [],
         checks: [],
         video: null,
+        videoInfo: null,
         failure: null,
     };
 
     const runtime = await boot({ application });
     const { session } = runtime;
     const consoleErrors = [];
+    const rawVideo = path.join(evidenceDir, 'recording-raw.mp4');
     const videoFile = path.join(evidenceDir, 'recording.mp4');
     let recording = null;
+    let recordingStartedAt = 0;
+    const timeline = [];
+    let currentCaption = null;
+
+    function mark(text, at = Date.now()) {
+        // Subtitle times are relative to the first recorded frame.
+        const relative = Math.max(0, at - recordingStartedAt);
+
+        if (currentCaption) {
+            currentCaption.endMs = relative;
+        }
+
+        if (!text) {
+            currentCaption = null;
+            return;
+        }
+
+        currentCaption = { startMs: relative, endMs: relative + 3000, text };
+        timeline.push(currentCaption);
+    }
 
     try {
         await waitForBridge(session);
         const mainHandle = await mainWindowHandle(session);
         await ensureOverlay(session);
-        recording = startRecording({ display, file: videoFile });
-        await sleep(600);
+        await session.waitForElement("[data-testid='search-view']");
+        await waitForPaint(session);
 
-        const state = { mainHandle };
+        // Open Settings before recording so its first frame is already painted.
+        // A window that is created during the recording shows a blank webview
+        // for several seconds, which looks like a still image.
+        const opened = await openSettings(session);
+        await session.waitForElement("[data-testid='settings-general-section']");
+        await ensureOverlay(session);
+        await waitForPaint(session);
+        await sleep(1200);
+
+        await session.switchTo(mainHandle);
+        await session.waitForElement("[data-testid='search-view']");
+        await ensureOverlay(session);
+        await waitForPaint(session);
+
+        const state = {
+            mainHandle,
+            settingsHandle: opened.settings,
+            windows: {
+                search: windowForSurface(display, 'search')?.id,
+                settings: windowForSurface(display, 'settings')?.id,
+            },
+        };
+        await isolateSurface(display, 'search', state);
+
+        await sleep(300);
+        recording = startRecording({ display, file: rawVideo });
+        recordingStartedAt = Date.now();
+        await sleep(500);
+        mark('UI preview start', recordingStartedAt);
 
         for (const scene of scenes) {
             const recorded = { title: scene.title, surface: scene.surface, shots: [] };
             manifest.scenes.push(recorded);
+            let currentStep = 'scene';
 
             try {
-                await switchToSurface(session, scene.surface, state);
+                await isolateSurface(display, scene.surface, state);
+                const handle = await switchToSurface(session, scene.surface, state);
+
+                await session.switchTo(handle);
+                await ensureOverlay(session);
+                await waitForPaint(session);
+                mark(scene.title);
+                await sleep(400);
 
                 for (const step of scene.steps) {
+                    currentStep = `${step.do}${step.value ? ` ${step.value}` : ''}${step.target ? ` ${step.target}` : ''}`;
+                    const caption = describeStep(step);
+
+                    if (caption) {
+                        mark(caption);
+                    }
+
                     if (step.do === 'bridge' && step.value === 'openSettingsWindow') {
-                        const opened = await openSettings(session);
-                        state.settingsHandle = opened.settings;
-                        await sleep(600);
+                        if (state.settingsHandle) {
+                            if (state.windows.settings) {
+                                showWindow(display, state.windows.settings);
+                            }
+                            await session.switchTo(state.settingsHandle);
+                            await ensureOverlay(session);
+                            await waitForPaint(session);
+                            continue;
+                        }
+
+                        const next = await openSettings(session);
+                        state.settingsHandle = next.settings;
+                        await waitForPaint(session);
+                        await sleep(500);
                         continue;
                     }
 
                     if (step.do === 'shot') {
+                        await sleep(200);
                         const overflow = await measureOverflow(session);
-                        const geometry = windowForSurface(display, scene.surface);
+                        await isolateSurface(display, scene.surface, state);
                         const file = `${scene.surface}-${step.name}.png`;
 
-                        if (!geometry) {
+                        if (!state.windows?.[scene.surface]) {
                             throw new Error(`no visible ${scene.surface} window to capture`);
                         }
 
-                        raiseWindow(display, geometry.id);
+                        raiseWindow(display, state.windows[scene.surface]);
                         await sleep(250);
                         // The overlay helps the video, but it must not cover the
                         // pixels a reviewer judges in a still.
-                        await session.execute('window.__UI_PREVIEW__?.hide();');
-                        await sleep(250);
-                        const size = captureScreenshot({
+                        const size = await captureStill({
+                            session,
                             display,
                             file: path.join(evidenceDir, file),
-                            geometry,
+                            surface: scene.surface,
+                            state,
                         });
-                        await session.execute('window.__UI_PREVIEW__?.show();');
+
+                        if (!size) {
+                            throw new Error(`the ${scene.surface} window did not paint a frame`);
+                        }
 
                         recorded.shots.push({
                             file,
@@ -282,12 +537,15 @@ async function main() {
                 }
             } catch (error) {
                 manifest.failure = {
-                    step: `${scene.title}: ${scene.steps.at(-1)?.do ?? 'scene'}`,
+                    step: `${scene.title}: ${currentStep}`,
                     message: error.message,
                 };
                 break;
             }
         }
+
+        mark('Preview complete');
+        await sleep(900);
 
         for (const handle of await session.windowHandles()) {
             try {
@@ -305,11 +563,68 @@ async function main() {
             }
         }
     } finally {
+        const durationMs = Math.max(0, Date.now() - recordingStartedAt);
+
+        if (currentCaption) {
+            currentCaption.endMs = Math.min(currentCaption.endMs, durationMs);
+        }
+
         if (recording) {
             const result = await recording.stop();
 
             if (result.ok) {
+                const captioned = burnCaptions({
+                    input: rawVideo,
+                    output: videoFile,
+                    title: `${sha.slice(0, 7)} · ${title || 'UI preview'}`,
+                    durationMs,
+                    steps: timeline,
+                });
+
+                if (captioned) {
+                    fs.rmSync(rawVideo, { force: true });
+                } else {
+                    fs.renameSync(rawVideo, videoFile);
+                }
+
+                const info = probeVideo(videoFile);
+                const distinctStates = countDistinctStates(videoFile);
+                const wallSeconds = durationMs / 1000;
+                const coverage = wallSeconds > 0 ? info.durationSeconds / wallSeconds : 0;
+
+                manifest.videoInfo = { ...info, distinctStates, wallSeconds, coverage };
                 manifest.video = path.basename(videoFile);
+
+                manifest.checks.push(
+                    {
+                        name: 'Recording length',
+                        status: info.durationSeconds >= MIN_VIDEO_SECONDS ? 'pass' : 'fail',
+                        detail: `${info.durationSeconds.toFixed(1)}s, ${info.frames} frames`,
+                    },
+                    {
+                        name: 'Recording shows a flow',
+                        status: distinctStates >= MIN_DISTINCT_STATES ? 'pass' : 'fail',
+                        detail: `${distinctStates} distinct states`,
+                    },
+                    {
+                        name: 'Recording covers the session',
+                        status: coverage >= MIN_COVERAGE ? 'pass' : 'fail',
+                        detail: `${info.durationSeconds.toFixed(1)}s of ${wallSeconds.toFixed(1)}s captured`,
+                    }
+                );
+
+                if (info.frames < MIN_VIDEO_FRAMES || info.durationSeconds < 1) {
+                    manifest.video = null;
+                    manifest.failure = {
+                        step: 'recording',
+                        message: `the recording has ${info.frames} frame(s) in ${info.durationSeconds.toFixed(1)}s`,
+                    };
+                } else if (coverage < MIN_COVERAGE) {
+                    manifest.failure = {
+                        step: 'recording',
+                        message: `the recorder captured only ${Math.round(coverage * 100)}% of the session, so the video is incomplete`,
+                    };
+                }
             } else {
                 console.log(`recording failed: ${result.stderr.slice(0, 500)}`);
             }
@@ -330,7 +645,7 @@ async function main() {
         {
             name: 'Recording captured',
             status: manifest.video ? 'pass' : 'not checked',
-            detail: manifest.video ? '' : 'ffmpeg did not produce an mp4',
+            detail: manifest.video ? '' : 'ffmpeg did not produce a usable mp4',
         },
         {
             name: 'Renderer console errors',

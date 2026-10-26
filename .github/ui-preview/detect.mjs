@@ -153,6 +153,7 @@ async function main() {
         decision: result.decision,
         reason: result.reason,
         pr: prNumber,
+        title: pull.title ?? '',
         sha: pull.head.sha,
         head_repo: pull.head.repo?.full_name ?? '',
         head_ref: pull.head.ref ?? '',

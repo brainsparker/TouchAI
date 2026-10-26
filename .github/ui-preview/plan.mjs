@@ -80,6 +80,7 @@ async function main() {
             touchedSearch: facts.files.some((file) =>
                 file.startsWith('apps/desktop/src/views/SearchView/')
             ),
+            testIds: facts.testIds,
         });
     }
 

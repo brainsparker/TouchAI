@@ -73,6 +73,31 @@ allowlisted, every click target must be a `data-testid` the build actually rende
 string has a length cap. When the model is unavailable or its plan is rejected, a deterministic
 plan for the changed surfaces is used instead, and the comment names the fallback.
 
+A plan that only opens a window and takes one screenshot is rejected. Every scene needs at least
+three interactions, the whole plan needs at least six interactions and three screenshots, and the
+fallback plan types a query character by character, walks settings sections, toggles a control, and
+scrolls a long list.
+
+## Recording quality
+
+The recording must show a flow, not a still image with a duration.
+
+- Recording starts only after the first surface has painted, so the video has no black lead-in.
+- Windows are opened before recording starts, so a blank webview never appears in the middle of a
+  scene.
+- The active window is moved below the title and the inactive window is unmapped. The search
+  window hides itself when it loses focus, so position alone is not enough.
+- ffmpeg captures at 10 fps and writes a constant 30 fps stream. Capturing 30 fps on a shared
+  runner dropped most frames and produced a video much shorter than the session.
+- Step captions are burned into a strip below the window, not drawn over the UI.
+- Screenshots are captured by window id. Cropping the root by an earlier geometry produced black
+  frames when the app recentred itself after a resize.
+
+Publishing re-checks the numbers and fails closed. A recording must be at least 6 seconds, at least
+60 frames, at least 5 distinct visual states, and cover at least 80% of the recording session. A
+missing `videoInfo` block is an error, not a pass. This is what stops a one-frame mp4 from being
+published as evidence.
+
 ## Credentials
 
 Publishing needs two credentials because GitHub's upload endpoint and comment API accept different
@@ -141,7 +166,9 @@ recording is never retried into a pass.
 - The desktop search and settings surfaces are covered. Tray and popup windows need test-only
   openers and get their own follow-up.
 - Locale coverage is a static key-parity check, not a rendered comparison in both languages.
-- Video is the whole 1280x900 virtual display; screenshots are cropped to the focused window.
+- Video is the whole 1280x900 virtual display; screenshots are captured from the active window.
+- The desktop behind the window is black. This Xvfb and picom combination ignores a root colour,
+  so a light background is not available without changing the compositor.
 
 ## Disabling
 

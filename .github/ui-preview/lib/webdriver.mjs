@@ -81,7 +81,7 @@ export class Session {
         this.currentWindow = null;
     }
 
-    async call(path, { method = 'POST', body } = {}) {
+    async call(path, { method = 'POST', body, timeoutMs = 60000 } = {}) {
         // WebKitWebDriver rejects a POST without a JSON body, even when the command
         // takes no parameters.
         const requestBody = body === undefined && method === 'POST' ? {} : body;
@@ -89,7 +89,7 @@ export class Session {
             method,
             headers: { 'Content-Type': 'application/json' },
             body: requestBody === undefined ? undefined : JSON.stringify(requestBody),
-            signal: AbortSignal.timeout(60000),
+            signal: AbortSignal.timeout(timeoutMs),
         });
 
         const payload = await response.json().catch(() => ({}));
@@ -172,9 +172,10 @@ export class Session {
         await this.call(`/element/${elementId}/click`);
     }
 
-    async hover(selector) {
+    async hover(selector, { timeoutMs = 8000 } = {}) {
         const elementId = await this.waitForElement(selector);
         await this.call('/actions', {
+            timeoutMs,
             body: {
                 actions: [
                     {
@@ -198,6 +199,15 @@ export class Session {
     async type(selector, text) {
         const elementId = await this.waitForElement(selector);
         await this.call(`/element/${elementId}/click`);
+        await this.call(`/element/${elementId}/value`, { body: { text } });
+    }
+
+    /**
+     * Appends text to the focused element. The recorder calls this once per
+     * character so typing is visible in the video.
+     */
+    async appendText(selector, text) {
+        const elementId = await this.waitForElement(selector);
         await this.call(`/element/${elementId}/value`, { body: { text } });
     }
 

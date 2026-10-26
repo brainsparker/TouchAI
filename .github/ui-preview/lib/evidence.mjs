@@ -9,6 +9,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import {
+    MIN_COVERAGE,
+    MIN_DISTINCT_STATES,
+    MIN_VIDEO_FRAMES,
+    MIN_VIDEO_SECONDS,
+} from './video-limits.mjs';
+
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const MP4_FTYP = Buffer.from('ftyp');
 
@@ -105,6 +112,7 @@ export function validateEvidence(evidenceDir, manifest) {
     if (manifest.video) {
         const relative = String(manifest.video);
         const absolute = path.resolve(root, relative);
+        const info = manifest.videoInfo;
 
         if (!isInside(root, absolute) || !fs.existsSync(absolute)) {
             errors.push(`video is missing: ${relative}`);
@@ -117,6 +125,39 @@ export function validateEvidence(evidenceDir, manifest) {
                 errors.push('video is too small to be real evidence');
             } else {
                 video = relative;
+            }
+
+            if (!info || typeof info !== 'object') {
+                errors.push('video metadata is missing, so the recording cannot be checked');
+            } else {
+                const duration = Number(info.durationSeconds ?? 0);
+                const frames = Number(info.frames ?? 0);
+                const distinctStates = Number(info.distinctStates ?? 0);
+                const coverage = Number(info.coverage ?? 0);
+                const width = Number(info.width ?? 0);
+                const height = Number(info.height ?? 0);
+
+                if (duration < MIN_VIDEO_SECONDS) {
+                    errors.push(`video is shorter than ${MIN_VIDEO_SECONDS}s`);
+                }
+
+                if (frames < MIN_VIDEO_FRAMES) {
+                    errors.push(`video has fewer than ${MIN_VIDEO_FRAMES} frames`);
+                }
+
+                if (distinctStates < MIN_DISTINCT_STATES) {
+                    errors.push(
+                        `video has fewer than ${MIN_DISTINCT_STATES} distinct states, so it is effectively a still`
+                    );
+                }
+
+                if (coverage < MIN_COVERAGE) {
+                    errors.push('video covers less than 80% of the recording session');
+                }
+
+                if (width < 320 || height < 240) {
+                    errors.push('video is smaller than any app window');
+                }
             }
         }
     }

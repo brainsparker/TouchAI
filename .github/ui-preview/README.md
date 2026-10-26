@@ -17,6 +17,8 @@ not install the workspace to run them.
 | `with-display.sh` | `explore`, `record` | Window manager and compositor for Xvfb |
 
 `lib/` holds the pure logic, which is covered by `apps/desktop/tests/ci/ui-preview-*.test.js`.
+`lib/video-limits.mjs` holds the minimum duration, frame count, distinct states, and coverage that
+both the recorder and the publisher enforce.
 
 ```bash
 pnpm test:unit -- ui-preview

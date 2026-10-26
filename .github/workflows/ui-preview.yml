@@ -48,6 +48,7 @@ jobs:
         outputs:
             decision: ${{ steps.decide.outputs.decision }}
             pr: ${{ steps.decide.outputs.pr }}
+            title: ${{ steps.decide.outputs.title }}
             sha: ${{ steps.decide.outputs.sha }}
             head_repo: ${{ steps.decide.outputs.head_repo }}
             base_sha: ${{ steps.decide.outputs.base_sha }}
@@ -300,6 +301,7 @@ jobs:
                   UI_PREVIEW_OUT: ${{ github.workspace }}/ui-preview-out
                   UI_PREVIEW_SHA: ${{ needs.detect.outputs.sha }}
                   UI_PREVIEW_PR: ${{ needs.detect.outputs.pr }}
+                  UI_PREVIEW_TITLE: ${{ needs.detect.outputs.title }}
                   UI_PREVIEW_RUN_URL: ${{ needs.detect.outputs.run_url }}
                   UI_PREVIEW_TRIGGER: ${{ needs.detect.outputs.trigger }}
                   TOUCHAI_APP_ROOT: ${{ runner.temp }}/ui-preview-app-root

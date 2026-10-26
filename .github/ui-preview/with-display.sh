@@ -9,7 +9,8 @@ if [ -z "${DISPLAY:-}" ]; then
     exit 1
 fi
 
-xsetroot -solid '#2b2b2b'
+# Keep this in sync with DESKTOP_COLOUR in lib/capture.mjs.
+xsetroot -solid '#000000'
 
 openbox --sm-disable >/tmp/openbox.log 2>&1 &
 openbox_pid=$!

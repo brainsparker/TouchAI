@@ -84,6 +84,14 @@ function manifest(overrides = {}) {
         sha: 'a1b2c3d4e5f6',
         scenes: [{ title: 'Search', shots: [{ file: 'evidence/search.png', caption: 'Search' }] }],
         video: 'evidence/recording.mp4',
+        videoInfo: {
+            durationSeconds: 12,
+            frames: 360,
+            distinctStates: 9,
+            coverage: 0.98,
+            width: 1280,
+            height: 900,
+        },
         ...overrides,
     };
 }
@@ -142,6 +150,43 @@ describe('user publishes evidence that was recorded', () => {
 
         expect(result.ok).toBe(false);
         expect(result.errors.join(' ')).toContain('too small');
+    });
+
+    it('user gets a failure when the video is one static frame', () => {
+        const root = makeRoot();
+        fs.mkdirSync(path.join(root, 'evidence'));
+        fs.writeFileSync(path.join(root, 'evidence/search.png'), png(400, 200));
+        fs.writeFileSync(path.join(root, 'evidence/recording.mp4'), mp4());
+
+        const result = validateEvidence(
+            root,
+            manifest({
+                videoInfo: {
+                    durationSeconds: 0.03,
+                    frames: 1,
+                    distinctStates: 1,
+                    coverage: 0.001,
+                    width: 1280,
+                    height: 900,
+                },
+            })
+        );
+
+        expect(result.ok).toBe(false);
+        expect(result.errors.join(' ')).toContain('effectively a still');
+        expect(result.errors.join(' ')).toContain('fewer than 60 frames');
+    });
+
+    it('user gets a failure when the recording reports no metadata', () => {
+        const root = makeRoot();
+        fs.mkdirSync(path.join(root, 'evidence'));
+        fs.writeFileSync(path.join(root, 'evidence/search.png'), png(400, 200));
+        fs.writeFileSync(path.join(root, 'evidence/recording.mp4'), mp4());
+
+        const result = validateEvidence(root, manifest({ videoInfo: undefined }));
+
+        expect(result.ok).toBe(false);
+        expect(result.errors.join(' ')).toContain('video metadata is missing');
     });
 
     it('user gets a failure when the manifest has no scenes', () => {

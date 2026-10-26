@@ -42,6 +42,20 @@ export const LIMITS = {
     waitMs: 5000,
 };
 
+/**
+ * A plan that only opens a window and takes one screenshot is not a preview: it
+ * shows a single static state. These minimums reject that shape so the recorder
+ * never produces a video with nothing happening in it.
+ */
+export const MINIMUMS = {
+    interactionsPerScene: 3,
+    shotsPerScene: 1,
+    totalInteractions: 6,
+    totalShots: 3,
+};
+
+const INTERACTIONS = ['bridge', 'click', 'hover', 'type', 'press', 'scroll'];
+
 const SHOT_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const TEST_ID_SELECTOR = /^\[data-testid=['"]?([A-Za-z0-9_.:-]+)['"]?\]$/;
 
@@ -99,6 +113,7 @@ export function validatePlan(plan, facts = {}) {
     }
 
     let shotCount = 0;
+    let interactionCount = 0;
     const accepted = [];
 
     scenes.forEach((scene, sceneIndex) => {
@@ -128,6 +143,8 @@ export function validatePlan(plan, facts = {}) {
         }
 
         const acceptedSteps = [];
+        let sceneInteractions = 0;
+        let sceneShots = 0;
 
         steps.forEach((step, stepIndex) => {
             const stepLabel = `${label} step ${stepIndex + 1}`;
@@ -224,6 +241,7 @@ export function validatePlan(plan, facts = {}) {
                 }
 
                 shotCount += 1;
+                sceneShots += 1;
 
                 if (shotCount > LIMITS.scenesWithShots) {
                     errors.push(`at most ${LIMITS.scenesWithShots} screenshots are allowed`);
@@ -231,13 +249,38 @@ export function validatePlan(plan, facts = {}) {
                 }
             }
 
+            if (INTERACTIONS.includes(step.do)) {
+                interactionCount += 1;
+                sceneInteractions += 1;
+            }
+
             acceptedSteps.push(step);
         });
+
+        if (sceneInteractions < MINIMUMS.interactionsPerScene) {
+            errors.push(
+                `${label} needs at least ${MINIMUMS.interactionsPerScene} interactions so the recording shows a flow`
+            );
+        }
+
+        if (sceneShots < MINIMUMS.shotsPerScene) {
+            errors.push(`${label} needs at least ${MINIMUMS.shotsPerScene} screenshot`);
+        }
 
         if (acceptedSteps.length > 0) {
             accepted.push({ ...scene, steps: acceptedSteps });
         }
     });
+
+    if (interactionCount < MINIMUMS.totalInteractions) {
+        errors.push(
+            `the plan needs at least ${MINIMUMS.totalInteractions} interactions, not ${interactionCount}`
+        );
+    }
+
+    if (shotCount < MINIMUMS.totalShots) {
+        errors.push(`the plan needs at least ${MINIMUMS.totalShots} screenshots, not ${shotCount}`);
+    }
 
     return {
         ok: errors.length === 0,
@@ -256,33 +299,151 @@ export function defaultPlan(facts = {}) {
     const touchedSearch = Boolean(facts.touchedSearch);
     const wantsSettings = touchedSettings || !touchedSearch;
     const wantsSearch = touchedSearch || !touchedSettings;
+    const testIds = facts.testIds ?? {};
+    const has = (surface, id) => {
+        const ids = testIds[surface];
+        return !ids || ids.includes(id);
+    };
 
     if (wantsSearch) {
+        const query = 'touchai';
+        const typed = [...query].map((_, index) => ({
+            do: 'bridge',
+            value: 'setSearchQuery',
+            args: [query.slice(0, index + 1)],
+        }));
+
         scenes.push({
             title: 'Search',
             surface: 'search',
             steps: [
                 {
+                    do: 'click',
+                    target: "[data-testid='search-editor-host']",
+                    caption: 'Focus the search bar',
+                },
+                ...typed,
+                {
+                    do: 'wait',
+                    value: 800,
+                    caption: 'Wait for the result',
+                },
+                {
+                    do: 'shot',
+                    name: 'search-query',
+                    caption: 'Search window with a query',
+                },
+                {
                     do: 'bridge',
                     value: 'setSearchQuery',
-                    args: ['touchai'],
-                    caption: 'Type a query',
+                    args: ['touchai settings'],
+                    caption: 'Refine the query',
                 },
-                { do: 'wait', value: 900, caption: 'Wait for results' },
-                { do: 'shot', name: 'search-results', caption: 'Search window with results' },
+                { do: 'wait', value: 800 },
+                {
+                    do: 'shot',
+                    name: 'search-refined',
+                    caption: 'Search window after refining the query',
+                },
             ],
         });
     }
 
     if (wantsSettings) {
+        const steps = [
+            { do: 'bridge', value: 'openSettingsWindow', caption: 'Open Settings' },
+            { do: 'wait', value: 600 },
+            {
+                do: 'shot',
+                name: 'settings-general',
+                caption: 'Settings opens on General',
+            },
+        ];
+
+        if (has('settings', 'settings-nav-shortcuts')) {
+            steps.push(
+                {
+                    do: 'click',
+                    target: "[data-testid='settings-nav-shortcuts']",
+                    caption: 'Open Shortcuts',
+                },
+                { do: 'wait', value: 500 },
+                {
+                    do: 'shot',
+                    name: 'settings-shortcuts',
+                    caption: 'Shortcuts section',
+                },
+                {
+                    do: 'scroll',
+                    value: 700,
+                    caption: 'Scroll the shortcut list',
+                },
+                { do: 'wait', value: 500 },
+                {
+                    do: 'shot',
+                    name: 'settings-shortcuts-scrolled',
+                    caption: 'Shortcuts section, scrolled',
+                }
+            );
+        }
+
+        if (has('settings', 'settings-nav-search')) {
+            steps.push(
+                {
+                    do: 'click',
+                    target: "[data-testid='settings-nav-search']",
+                    caption: 'Open Search settings',
+                },
+                { do: 'wait', value: 500 },
+                {
+                    do: 'shot',
+                    name: 'settings-search',
+                    caption: 'Search settings',
+                }
+            );
+
+            if (has('settings', 'search-enabled-toggle')) {
+                steps.push(
+                    {
+                        do: 'click',
+                        target: "[data-testid='search-enabled-toggle']",
+                        caption: 'Toggle search',
+                    },
+                    { do: 'wait', value: 400 },
+                    {
+                        do: 'shot',
+                        name: 'settings-search-toggled',
+                        caption: 'Search toggled off',
+                    },
+                    {
+                        do: 'click',
+                        target: "[data-testid='search-enabled-toggle']",
+                        caption: 'Restore search',
+                    }
+                );
+            }
+        }
+
+        if (has('settings', 'settings-nav-usage')) {
+            steps.push(
+                {
+                    do: 'click',
+                    target: "[data-testid='settings-nav-usage']",
+                    caption: 'Open Usage',
+                },
+                { do: 'wait', value: 600 },
+                {
+                    do: 'shot',
+                    name: 'settings-usage',
+                    caption: 'Usage dashboard',
+                }
+            );
+        }
+
         scenes.push({
             title: 'Settings',
             surface: 'settings',
-            steps: [
-                { do: 'bridge', value: 'openSettingsWindow', caption: 'Open settings' },
-                { do: 'wait', value: 1200, caption: 'Wait for the window' },
-                { do: 'shot', name: 'settings-general', caption: 'Settings, general section' },
-            ],
+            steps,
         });
     }
 

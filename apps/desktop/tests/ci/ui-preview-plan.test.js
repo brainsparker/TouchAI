@@ -9,7 +9,12 @@ import {
 const facts = {
     testIds: {
         search: ['search-view', 'search-bar', 'quick-search-panel'],
-        settings: ['settings-view', 'settings-nav-shortcuts', 'settings-shortcuts-section'],
+        settings: [
+            'settings-view',
+            'settings-nav-shortcuts',
+            'settings-nav-search',
+            'settings-shortcuts-section',
+        ],
     },
 };
 
@@ -28,7 +33,14 @@ describe('user reads a plan from the model', () => {
         const result = validatePlan(
             planWithSteps([
                 { do: 'click', target: "[data-testid='settings-nav-shortcuts']" },
+                { do: 'click', target: "[data-testid='settings-nav-search']" },
+                { do: 'click', target: "[data-testid='settings-nav-shortcuts']" },
+                { do: 'click', target: "[data-testid='settings-nav-search']" },
+                { do: 'click', target: "[data-testid='settings-nav-shortcuts']" },
+                { do: 'click', target: "[data-testid='settings-nav-search']" },
                 { do: 'shot', name: 'shortcuts' },
+                { do: 'shot', name: 'search-settings' },
+                { do: 'shot', name: 'back-to-shortcuts' },
             ]),
             facts
         );
@@ -102,6 +114,37 @@ describe('user reads a plan from the model', () => {
 
         expect(result.ok).toBe(false);
     });
+
+    it('user gets a rejection when a scene only opens a window and takes one screenshot', () => {
+        const result = validatePlan(planWithSteps([{ do: 'shot', name: 'only-frame' }]), facts);
+
+        expect(result.ok).toBe(false);
+        expect(result.errors.join(' ')).toContain('at least 3 interactions');
+    });
+
+    it('user gets a rejection when the whole plan has too little to watch', () => {
+        const result = validatePlan(
+            {
+                ui_change: true,
+                summary: 'x',
+                scenes: [
+                    {
+                        title: 'A',
+                        surface: 'settings',
+                        steps: [
+                            { do: 'click', target: "[data-testid='settings-nav-shortcuts']" },
+                            { do: 'click', target: "[data-testid='settings-nav-search']" },
+                            { do: 'shot', name: 'a' },
+                        ],
+                    },
+                ],
+            },
+            facts
+        );
+
+        expect(result.ok).toBe(false);
+        expect(result.errors.join(' ')).toContain('at least 6 interactions');
+    });
 });
 
 describe('user falls back to a deterministic plan', () => {
@@ -109,12 +152,19 @@ describe('user falls back to a deterministic plan', () => {
         const plan = defaultPlan({ touchedSearch: true, touchedSettings: false });
 
         expect(plan.scenes.map((scene) => scene.surface)).toEqual(['search']);
+        expect(plan.scenes[0].steps.filter((step) => step.do === 'shot').length).toBeGreaterThan(1);
+        expect(
+            plan.scenes[0].steps.filter((step) =>
+                ['bridge', 'click', 'type', 'press', 'scroll'].includes(step.do)
+            ).length
+        ).toBeGreaterThan(3);
     });
 
     it('user sees the settings window when only settings changed', () => {
         const plan = defaultPlan({ touchedSearch: false, touchedSettings: true });
 
         expect(plan.scenes.map((scene) => scene.surface)).toEqual(['settings']);
+        expect(plan.scenes[0].steps.filter((step) => step.do === 'shot').length).toBeGreaterThan(2);
     });
 
     it('user sees both surfaces when the change is shared', () => {
