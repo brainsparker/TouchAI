@@ -5,9 +5,9 @@ preview comment a pull request receives.
 
 ## What it does
 
-A pull request that changes desktop interface files gets one advisory comment with screenshots and
-an mp4 of the built app. The comment is updated in place on every commit. It is not part of
-`CI Required` and never blocks a merge.
+A pull request that changes desktop interface files gets one advisory comment with a native screen
+recording and key screenshots from the Linux, macOS, and Windows builds. The comment is updated in
+place on every commit. It is not part of `CI Required` and never blocks a merge.
 
 ## When it runs
 
@@ -48,24 +48,24 @@ The workflow is split so that no job both runs pull-request code and holds a sec
 | Job | Checks out | Secrets | Permissions |
 | --- | --- | --- | --- |
 | `detect` | default branch | App key | `contents: read` |
-| `explore` | pull-request head | none | `contents: read` |
+| `explore` (matrix) | pull-request head | none | `contents: read` |
 | `plan` | default branch | model key | `contents: read`, `pull-requests: read` |
-| `record` | default branch | none | `contents: read` |
+| `record` (matrix) | default branch | none | `contents: read` |
 | `publish` | default branch | upload token, App key | `contents: read` |
 
 `explore` is the only job that checks out the pull request, and it is the only job that builds it.
-`record` runs the binary that `explore` produced, but drives it with scripts from the default
-branch, so a pull request cannot change the recorder. `plan` and `publish` never execute
-pull-request code.
+It runs once per platform. `record` runs the binary that `explore` produced on the same platform,
+but drives it with scripts from the default branch, so a pull request cannot change the recorder.
+`plan` and `publish` never execute pull-request code.
 
 ## Pipeline
 
 ```text
 detect   decide, comment, output pr/sha
-explore  build once, boot under Xvfb, collect test ids, an element outline, locale parity
+explore  build on Linux, macOS, and Windows, collect test ids, an element outline, locale parity
 plan     interface-only diff + outline -> validated JSON scene plan
-record   seed fixture data, run the plan, capture screenshots and mp4
-publish  validate evidence, upload assets, update the comment
+record   seed fixture data, run the plan, capture native video and key screenshots on each platform
+publish  validate each platform's evidence, upload assets, update the one comment
 ```
 
 The model sees the diff of the interface files only, the description, the test ids, and an outline
@@ -79,6 +79,31 @@ A plan that only opens a window and takes one screenshot is rejected. Every scen
 three interactions, the whole plan needs at least six interactions and three screenshots, and the
 fallback plan types a query character by character, walks settings sections, toggles a control, and
 scrolls a long list.
+
+## Native capture
+
+The video is a real screen capture from the platform's own capture device, not a slideshow of
+screenshots. The same plan runs on all three builds.
+
+| Platform | Capture | Display | Frames |
+| --- | --- | --- | --- |
+| Linux | ffmpeg `x11grab` under Xvfb | 1280x900 | 10 fps in, 30 fps CFR out |
+| macOS | ffmpeg `avfoundation` (`Capture screen 0:none`) | 1920x1080 when the runner offers it | 30 fps in, 30 fps CFR out |
+| Windows | ffmpeg `gdigrab` (`desktop`) | 1920x1080 when the runner offers it | 10 fps in, 30 fps CFR out |
+
+macOS uses a Swift helper with CoreGraphics to select an unscaled mode for the disposable runner
+session when the current mode is scaled or too small. It prefers 1920x1080 and otherwise takes the
+smallest mode at least 1280x900. Windows uses `Set-DisplayResolution` and falls back to a Win32
+display-mode change with the same preference. Both helpers export the actual display size, and the
+recorder fails before booting the app when the display is smaller than 1280x900.
+
+The workflow does not modify TCC. On macOS it relies on the screen-capture grant and replayd
+approval present in the hosted runner image, and the first post-merge macOS run is what validates
+that assumption. If capture is denied, the recorder keeps the screenshots and publishes the capture
+failure instead of a video.
+
+Linux records the 1280x900 Xvfb root directly. macOS and Windows record the larger desktop and crop
+the top-left 1280x900 stage in the caption pass, so all three videos have the same shape.
 
 ## Fixture data
 
@@ -99,20 +124,30 @@ The recording must show a flow, not a still image with a duration.
 - Recording starts only after the first surface has painted, so the video has no black lead-in.
 - Windows are opened before recording starts, so a blank webview never appears in the middle of a
   scene.
-- The active window is moved below the title and the inactive window is unmapped. The search
-  window hides itself when it loses focus, so position alone is not enough.
+- On Linux the inactive window is unmapped, because the search window hides itself when it loses
+  focus. On macOS and Windows the inactive WebDriver window is moved off-screen.
+- The active window is moved below the burned-in title on every platform.
 - The window is re-pinned after every step: the search window grows when results appear and the
   app recentres itself, which would otherwise slide it to the middle of the screen mid-clip.
 - Opening a settings section resets the shared content scroll, so a section opened after a scroll
   does not start mid-page.
-- ffmpeg captures at 10 fps and writes a constant 30 fps stream. Capturing 30 fps on a shared
-  runner dropped most frames and produced a video much shorter than the session.
+- Linux and Windows capture at 10 fps and write a constant 30 fps stream. Capturing 30 fps on the
+  shared Linux runner dropped most frames and produced a video much shorter than the session.
 - Step captions are burned into a strip below the window, not drawn over the UI.
-- The cursor draws a fading trail and a ring on each click, so a viewer can follow the path.
+- The overlay draws a fading trail and a ring on each click, so a viewer can follow the path. The
+  operating-system pointer is disabled in the native capture to avoid a second, unrelated cursor.
 - A `shot` may name a `data-testid`; that screenshot is cropped to the element with room around it
-  and a minimum size, instead of shrinking the whole window.
-- Screenshots are captured by window id. Cropping the root by an earlier geometry produced black
-  frames when the app recentred itself after a resize.
+  and a minimum size, instead of shrinking the whole window. The crop uses ffmpeg, so it works on
+  every platform.
+- Each scene also gets a start-of-scene screenshot unless the plan already starts with a shot. At
+  most ten key screenshots are kept per platform.
+- Linux screenshots are captured by window id. Cropping the root by an earlier geometry produced
+  black frames when the app recentred itself after a resize. macOS and Windows use the WebDriver
+  webview screenshot for the current window.
+
+All screenshots for a platform are collected into one collapsed `Key screenshots` block in the
+comment. The video stays visible above it, so the recording is the primary evidence and the stills
+are available without making the comment enormous.
 
 ## Comment lifecycle
 
@@ -130,11 +165,17 @@ manual run.
 
 Publishing re-checks the numbers and fails closed. A recording must be at least 6 seconds, at least
 60 frames, at least 5 distinct visual states, and cover at least 80% of the recording session. A
-missing `videoInfo` block is an error, not a pass. This is what stops a one-frame mp4 from being
-published as evidence.
+missing `videoInfo` block is an error, not a pass, and the reported capture mode must match the
+manifest's native capture device. This is what stops a one-frame mp4, or a screenshot sequence
+disguised as a recording, from being published as evidence.
 
 Publishing also refuses evidence that contains something shaped like a credential, and posts a
 comment saying that nothing was published.
+
+Each platform has its own manifest and evidence directory. Publishing validates every manifest,
+uploads at most ten screenshots and one video per platform, and builds one comment with a section
+per platform. A platform whose recording job produced no manifest is reported as missing instead of
+being silently omitted.
 
 ## Credentials
 
@@ -153,6 +194,10 @@ tokens. It needs a token that belongs to a user with `admin`, `maintain` or `wri
 repository. The comment endpoints accept an App installation token with `Issues: write` or
 `Pull requests: write`. An upload has no author field, so the asset URL carries no attribution and
 the comment carries the bot identity.
+
+The workflow passes `steps.app.outputs.app-slug` as `UI_PREVIEW_BOT_LOGIN`, so comment lookup does
+not call `GET /user`. Installation tokens cannot use that endpoint. The scripts only fall back to
+`GET /user` for local runs with a user token.
 
 Every asset is referenced as a bare URL on its own line. That is required, not cosmetic: an
 uploaded asset is only served to readers after a comment references it as a bare URL. An `<img>`
@@ -189,8 +234,10 @@ it and read the two jobs. `doctor` proves the model endpoint, the bot identity, 
 credential, and names the credential class that failed. It never posts a comment. Run it after
 rotating a secret and before the first preview on a real pull request.
 
-The full recorder needs a Linux desktop stack: `xvfb`, `openbox`, `picom`, `ffmpeg`, `imagemagick`,
-`xdotool`, `webkit2gtk-driver`, and `tauri-driver`.
+The Linux recorder needs `xvfb`, `openbox`, `picom`, `ffmpeg`, `imagemagick`, and `xdotool`. The app
+is built with `--features ui-preview-webdriver`, which starts the embedded WebDriver server in a
+debug build. The feature is rejected in non-debug builds. macOS and Windows use the same embedded
+server and need no external driver.
 
 ## Failure behavior
 
@@ -200,13 +247,17 @@ recording is never retried into a pass.
 
 ## Limitations
 
-- Capture is Linux WebKitGTK only. Windows WebView2 and macOS may render differently.
+- The app still renders through WebKitGTK on Linux, WebView2 on Windows, and WKWebView on macOS, so
+  fonts and native window chrome can differ.
 - The desktop search and settings surfaces are covered. Tray and popup windows need test-only
   openers and get their own follow-up.
 - Locale coverage is a static key-parity check, not a rendered comparison in both languages.
-- Video is the whole 1280x900 virtual display; screenshots are captured from the active window.
-- The desktop behind the window is black. This Xvfb and picom combination ignores a root colour,
-  so a light background is not available without changing the compositor.
+- Video is the 1280x900 preview stage. Linux uses the whole Xvfb root; macOS and Windows crop the
+  top-left stage from a larger hosted desktop.
+- macOS and Windows screenshots are webview-only, so native shadows and desktop pixels are not part
+  of the still. The recording still shows them.
+- The Linux desktop behind the window is black. This Xvfb and picom combination ignores a root
+  colour, so a light background is not available without changing the compositor.
 
 ## Disabling
 

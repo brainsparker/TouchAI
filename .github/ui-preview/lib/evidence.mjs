@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { captureMode, PLATFORMS } from './platform.mjs';
 import {
     MIN_COVERAGE,
     MIN_DISTINCT_STATES,
@@ -64,6 +65,28 @@ export function validateEvidence(evidenceDir, manifest) {
 
     if (!/^[0-9a-f]{7,40}$/.test(String(manifest.sha ?? ''))) {
         errors.push('manifest sha is not a commit sha');
+    }
+
+    if (manifest.platform && !PLATFORMS.includes(manifest.platform)) {
+        errors.push(`manifest platform is not supported: ${manifest.platform}`);
+    }
+
+    if (!manifest.platform) {
+        errors.push('manifest platform is missing');
+    }
+
+    if (!manifest.captureMode) {
+        errors.push('manifest capture mode is missing');
+    }
+
+    if (
+        manifest.platform &&
+        manifest.captureMode &&
+        manifest.captureMode !== captureMode(manifest.platform)
+    ) {
+        errors.push(
+            `manifest capture mode ${manifest.captureMode} does not match ${manifest.platform}`
+        );
     }
 
     const scenes = Array.isArray(manifest.scenes) ? manifest.scenes : [];
@@ -137,6 +160,12 @@ export function validateEvidence(evidenceDir, manifest) {
                 const width = Number(info.width ?? 0);
                 const height = Number(info.height ?? 0);
 
+                if (info.mode !== manifest.captureMode) {
+                    errors.push(
+                        `video capture mode ${info.mode || '(missing)'} does not match ${manifest.captureMode}`
+                    );
+                }
+
                 if (duration < MIN_VIDEO_SECONDS) {
                     errors.push(`video is shorter than ${MIN_VIDEO_SECONDS}s`);
                 }
@@ -164,6 +193,10 @@ export function validateEvidence(evidenceDir, manifest) {
 
     if (shots.length === 0 && !video) {
         errors.push('the manifest has no usable evidence');
+    }
+
+    if (!manifest.video && !manifest.failure) {
+        errors.push('the manifest has no video and does not report a capture failure');
     }
 
     return { ok: errors.length === 0, errors, assets: { shots, video } };

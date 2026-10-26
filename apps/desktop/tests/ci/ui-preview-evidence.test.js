@@ -82,6 +82,8 @@ function manifest(overrides = {}) {
     return {
         version: 1,
         sha: 'a1b2c3d4e5f6',
+        platform: 'linux',
+        captureMode: 'x11grab',
         scenes: [{ title: 'Search', shots: [{ file: 'evidence/search.png', caption: 'Search' }] }],
         video: 'evidence/recording.mp4',
         videoInfo: {
@@ -91,6 +93,7 @@ function manifest(overrides = {}) {
             coverage: 0.98,
             width: 1280,
             height: 900,
+            mode: 'x11grab',
         },
         ...overrides,
     };
@@ -168,6 +171,7 @@ describe('user publishes evidence that was recorded', () => {
                     coverage: 0.001,
                     width: 1280,
                     height: 900,
+                    mode: 'x11grab',
                 },
             })
         );
@@ -200,6 +204,48 @@ describe('user publishes evidence that was recorded', () => {
         const result = validateEvidence(makeRoot(), manifest({ sha: 'not-a-sha' }));
 
         expect(result.ok).toBe(false);
+    });
+
+    it('user gets a failure when the platform and capture mode disagree', () => {
+        const result = validateEvidence(
+            makeRoot(),
+            manifest({ platform: 'macos', captureMode: 'x11grab' })
+        );
+
+        expect(result.ok).toBe(false);
+        expect(result.errors.join(' ')).toContain('does not match macos');
+    });
+
+    it('user gets a failure when the video was not captured natively', () => {
+        const root = makeRoot();
+        fs.mkdirSync(path.join(root, 'evidence'));
+        fs.writeFileSync(path.join(root, 'evidence/search.png'), png(400, 200));
+        fs.writeFileSync(path.join(root, 'evidence/recording.mp4'), mp4());
+
+        const result = validateEvidence(
+            root,
+            manifest({ videoInfo: { ...manifest().videoInfo, mode: 'screenshot-sequence' } })
+        );
+
+        expect(result.ok).toBe(false);
+        expect(result.errors.join(' ')).toContain('video capture mode');
+    });
+
+    it('user gets a failure when the platform is unknown', () => {
+        const result = validateEvidence(
+            makeRoot(),
+            manifest({ platform: 'beos', captureMode: 'gdigrab' })
+        );
+
+        expect(result.ok).toBe(false);
+        expect(result.errors.join(' ')).toContain('platform is not supported');
+    });
+
+    it('user gets a failure when a failed recording does not say why', () => {
+        const result = validateEvidence(makeRoot(), manifest({ video: null, videoInfo: null }));
+
+        expect(result.ok).toBe(false);
+        expect(result.errors.join(' ')).toContain('does not report a capture failure');
     });
 });
 

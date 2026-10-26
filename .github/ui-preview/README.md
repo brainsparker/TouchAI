@@ -9,13 +9,15 @@ not install the workspace to run them.
 | File | Job | Purpose |
 | --- | --- | --- |
 | `detect.mjs` | `detect` | Decide, comment, emit outputs |
-| `explore.mjs` | `explore` | Build facts: test ids, element outline, sections, overflow, locale parity |
+| `explore.mjs` | `explore` | Build facts on each platform: test ids, element outline, sections, overflow, locale parity |
 | `plan.mjs` | `plan` | Model call and plan validation |
 | `seed.mjs` | `record` | Fixture usage data for the throwaway app root |
-| `record.mjs` | `record` | Execute the plan, capture screenshots and mp4 |
-| `publish.mjs` | `publish` | Validate evidence, scan for credentials, upload, update the comment |
+| `record.mjs` | `record` | Execute the plan, capture native video and key screenshots |
+| `publish.mjs` | `publish` | Validate every platform's evidence, scan for credentials, upload, update the comment |
 | `doctor.mjs` | manual | Preflight the credentials |
 | `with-display.sh` | `explore`, `record` | Window manager and compositor for Xvfb |
+| `macos-display.swift` | `explore`, `record` | Select the best unscaled hosted macOS display mode at least 1280x900 |
+| `configure-display.ps1` | `explore`, `record` | Select the best hosted Windows display mode at least 1280x900 |
 
 `lib/` holds the pure logic, which is covered by `apps/desktop/tests/ci/ui-preview-*.test.js`.
 `lib/video-limits.mjs` holds the minimum duration, frame count, distinct states, and coverage that

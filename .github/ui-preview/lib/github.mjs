@@ -50,6 +50,21 @@ async function request(url, { token, method = 'GET', body, accept, contentType }
     return text ? JSON.parse(text) : null;
 }
 
+/**
+ * Installation tokens cannot call GET /user, so the workflow passes the App
+ * slug it just minted. The fallback keeps local user-token runs working.
+ */
+export async function resolveBotLogin(client, configuredLogin = '') {
+    const login = String(configuredLogin ?? '').trim();
+
+    if (login) {
+        return login;
+    }
+
+    const user = await client.getAuthenticatedUser();
+    return user?.login ?? '';
+}
+
 export function createClient({ token, owner, repo }) {
     const repoPath = `/repos/${owner}/${repo}`;
 

@@ -16,7 +16,7 @@ import {
     isUnchanged,
 } from './lib/comment.mjs';
 import { decide, DECISION } from './lib/decision.mjs';
-import { createClient } from './lib/github.mjs';
+import { createClient, resolveBotLogin } from './lib/github.mjs';
 import { classifyFiles } from './lib/paths.mjs';
 
 function readEvent() {
@@ -58,8 +58,7 @@ async function main() {
     }
 
     const client = createClient({ token, owner, repo });
-    const bot = await client.getAuthenticatedUser();
-    const botLogin = bot?.login;
+    const botLogin = await resolveBotLogin(client, process.env.UI_PREVIEW_BOT_LOGIN);
     const dryRun = String(process.env.UI_PREVIEW_DRY_RUN ?? '') === '1';
     const dispatchPr = Number(process.env.INPUT_PR ?? 0);
     const manualForce = String(process.env.INPUT_FORCE ?? '') === 'true';

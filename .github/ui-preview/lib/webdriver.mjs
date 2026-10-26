@@ -21,14 +21,19 @@ export function isSearchUrl(url) {
         return false;
     }
 
-    return value.endsWith('#/') || value === 'tauri://localhost';
+    return (
+        value.endsWith('#/') ||
+        value.endsWith('/') ||
+        value === 'tauri://localhost' ||
+        value === 'http://tauri.localhost'
+    );
 }
 
 export function isSettingsUrl(url) {
     return String(url ?? '').includes('/settings');
 }
 
-async function waitForPort(port, timeoutMs = 30000) {
+export async function waitForPort(port, timeoutMs = 60000) {
     const startedAt = Date.now();
 
     while (Date.now() - startedAt < timeoutMs) {
@@ -37,7 +42,11 @@ async function waitForPort(port, timeoutMs = 30000) {
                 signal: AbortSignal.timeout(1000),
             });
             if (response.ok) {
-                return;
+                const payload = await response.json().catch(() => ({}));
+
+                if (payload?.value?.ready !== false) {
+                    return;
+                }
             }
         } catch {
             // Driver is still starting.
@@ -46,7 +55,7 @@ async function waitForPort(port, timeoutMs = 30000) {
         await new Promise((resolve) => setTimeout(resolve, 250));
     }
 
-    throw new Error(`tauri-driver did not listen on port ${port} within ${timeoutMs}ms`);
+    throw new Error(`the WebDriver server did not listen on port ${port} within ${timeoutMs}ms`);
 }
 
 export async function startDriver({ port = DRIVER_PORT, env = process.env } = {}) {
@@ -257,6 +266,49 @@ export class Session {
         return this.call('/url', { method: 'GET' });
     }
 
+    async getWindowRect() {
+        return this.call('/window/rect', { method: 'GET' });
+    }
+
+    async setWindowRect(rect) {
+        return this.call('/window/rect', { body: rect });
+    }
+
+    async screenshot() {
+        return this.call('/screenshot', { method: 'GET', timeoutMs: 30000 });
+    }
+
+    /**
+     * Bring the current webview window to the front.
+     *
+     * WebDriver's window switch only changes the automation target; it does not
+     * activate the native window. The app hides the search surface on blur, so
+     * the recorder asks Tauri to show and focus the target before capturing.
+     */
+    async focusWindow() {
+        try {
+            return await this.executeAsync(`
+                const done = arguments[arguments.length - 1];
+                (async () => {
+                    try {
+                        const current = window.__TAURI__?.window?.getCurrentWindow?.();
+                        if (!current) {
+                            done(false);
+                            return;
+                        }
+                        await current.show();
+                        await current.setFocus();
+                        done(true);
+                    } catch {
+                        done(false);
+                    }
+                })();
+            `);
+        } catch {
+            return false;
+        }
+    }
+
     /**
      * Switches to the window whose URL contains the fragment, creating it first if
      * needed. Returns the handle so the caller can switch back.
@@ -281,17 +333,21 @@ export class Session {
     }
 }
 
-export async function createSession({ port = DRIVER_PORT, application }) {
+export async function createSession({ port = DRIVER_PORT, application, driver = 'tauri-driver' }) {
+    const capabilities =
+        driver === 'embedded'
+            ? { alwaysMatch: {} }
+            : {
+                  alwaysMatch: {
+                      browserName: 'wry',
+                      'tauri:options': { application },
+                  },
+              };
     const response = await fetch(`http://127.0.0.1:${port}/session`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            capabilities: {
-                alwaysMatch: {
-                    browserName: 'wry',
-                    'tauri:options': { application },
-                },
-            },
+            capabilities,
         }),
         signal: AbortSignal.timeout(120000),
     });

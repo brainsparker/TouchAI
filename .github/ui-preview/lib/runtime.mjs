@@ -1,26 +1,75 @@
 /**
  * Shared app-driving helpers for the explore and record jobs.
  *
- * Both jobs boot the same binary the same way: Xvfb with a window manager, a
- * tauri-driver session, and the app's own E2E bridge. Nothing here reads or
- * writes user data; the app runs against a temporary root.
+ * Both jobs boot the same binary the same way: the app's embedded WebDriver
+ * server plus its own E2E bridge. Linux adds Xvfb and a window manager. Nothing
+ * here reads or writes user data; the app runs against a temporary root.
  */
 
+import { spawn, spawnSync } from 'node:child_process';
+
 import { OVERLAY_SCRIPT } from './overlay.mjs';
-import { createSession, isSearchUrl, startDriver } from './webdriver.mjs';
+import { detectPlatform } from './platform.mjs';
+import { createSession, isSearchUrl, waitForPort } from './webdriver.mjs';
 
 export const MAIN_WINDOW_TIMEOUT_MS = 30000;
+export const EMBEDDED_DRIVER_PORT = 4445;
 
-export async function boot({ application, port = 4444 }) {
-    const driver = await startDriver({ port });
-    const session = await createSession({ port, application });
+function stopProcess(child) {
+    if (!child || child.exitCode !== null) {
+        return;
+    }
+
+    if (process.platform === 'win32') {
+        spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+            stdio: 'ignore',
+            windowsHide: true,
+        });
+        return;
+    }
+
+    child.kill('SIGTERM');
+}
+
+/**
+ * Boots the app with the embedded WebDriver server enabled. The same path
+ * works on Linux, macOS, and Windows, so the recorder does not depend on an
+ * external driver process.
+ */
+export async function boot({ application, platform = detectPlatform() }) {
+    const port = EMBEDDED_DRIVER_PORT;
+    const child = spawn(application, [], {
+        env: { ...process.env, TAURI_WEBDRIVER_PORT: String(port) },
+        stdio: ['ignore', 'inherit', 'inherit'],
+        windowsHide: true,
+    });
+    const exited = { value: null };
+    child.once('exit', (code, signal) => {
+        exited.value = { code, signal };
+    });
+
+    try {
+        await waitForPort(port);
+    } catch (error) {
+        stopProcess(child);
+        throw new Error(
+            `the ${platform} app did not expose the embedded WebDriver server: ${error.message}`,
+            { cause: error }
+        );
+    }
+
+    const session = await createSession({ port, application, driver: 'embedded' });
 
     return {
-        driver,
+        child,
+        port,
         session,
+        get exited() {
+            return exited.value;
+        },
         async close() {
             await session.quit();
-            driver.stop();
+            stopProcess(child);
         },
     };
 }
@@ -82,7 +131,14 @@ export async function windowHandles(session) {
 }
 
 export async function mainWindowHandle(session) {
-    for (const handle of await session.windowHandles()) {
+    const handles = await session.windowHandles();
+
+    if (handles.includes('main')) {
+        await session.switchTo('main');
+        return 'main';
+    }
+
+    for (const handle of handles) {
         await session.switchTo(handle);
         const url = String(await session.currentUrl());
 
@@ -99,6 +155,7 @@ export async function openSettings(session) {
     await bridge(session, 'openSettingsWindow');
     const settings = await session.switchToWindowContaining('/settings');
     await session.waitForElement("[data-testid='settings-view']");
+    await session.focusWindow();
     await ensureOverlay(session);
 
     return { main, settings };
@@ -109,6 +166,7 @@ export async function switchToSurface(session, surface, state = {}) {
         const handle = state.settingsHandle ?? (await openSettings(session)).settings;
         await session.switchTo(handle);
         await session.waitForElement("[data-testid='settings-view']");
+        await session.focusWindow();
         await ensureOverlay(session);
         return handle;
     }
@@ -116,6 +174,7 @@ export async function switchToSurface(session, surface, state = {}) {
     const handle = state.mainHandle ?? (await mainWindowHandle(session));
     await session.switchTo(handle);
     await session.waitForElement("[data-testid='search-view']");
+    await session.focusWindow();
     await ensureOverlay(session);
     return handle;
 }

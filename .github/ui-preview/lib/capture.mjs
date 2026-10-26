@@ -1,12 +1,13 @@
 /**
  * X11 capture helpers.
  *
- * Screenshots come from the Xvfb root and are cropped to the focused window, so
- * native transparency and rounded corners are visible against a known desktop
- * colour. The video records the whole virtual display at 30 fps.
+ * On Linux, screenshots come from the Xvfb root and are cropped to the focused
+ * window, so native transparency and rounded corners are visible against a
+ * known desktop colour. macOS and Windows use the WebDriver screenshot of the
+ * current webview. Video capture lives in native-capture.mjs.
  */
 
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -18,10 +19,6 @@ export const STAGE_TOP = 64;
 // picom renders the root window black on this Xvfb build even after the root
 // pixmap is set, so black is the colour the capture actually shows.
 export const DESKTOP_COLOUR = '#000000';
-
-// The recorder requests 10 fps because 30 fps on a shared runner drops most
-// frames and produces a video that is far shorter than the session.
-export const RECORDING_FPS = 10;
 
 function run(command, args, options = {}) {
     const result = spawnSync(command, args, { encoding: 'utf8', ...options });
@@ -248,12 +245,20 @@ export function cropToElement({
         Math.min(size.height - wanted.height, Math.round(centerY - wanted.height / 2))
     );
     const scratch = `${file}.crop.png`;
-    const convert = hasCommand('magick') ? 'magick' : 'convert';
-    const result = run(convert, [
+    // ffmpeg is required on every platform for the recording, so it is the
+    // one crop tool that is always present. ImageMagick is only needed for
+    // the X11 window capture itself.
+    const result = run('ffmpeg', [
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        '-y',
+        '-i',
         file,
-        '-crop',
-        `${wanted.width}x${wanted.height}+${x}+${y}`,
-        '+repage',
+        '-vf',
+        `crop=${wanted.width}:${wanted.height}:${x}:${y}`,
+        '-frames:v',
+        '1',
         scratch,
     ]);
 
@@ -310,71 +315,6 @@ export function captureScreenshot({ display, file, geometry, id }) {
     }
 
     return { width: geometry.width, height: geometry.height };
-}
-
-export function startRecording({ display, file }) {
-    const args = [
-        '-hide_banner',
-        '-loglevel',
-        'error',
-        '-y',
-        '-f',
-        'x11grab',
-        '-framerate',
-        String(RECORDING_FPS),
-        '-thread_queue_size',
-        '1024',
-        '-video_size',
-        `${SCREEN_WIDTH}x${SCREEN_HEIGHT}`,
-        '-i',
-        `${display}.0+0,0`,
-        '-c:v',
-        'libx264',
-        '-preset',
-        'ultrafast',
-        '-tune',
-        'zerolatency',
-        '-crf',
-        '26',
-        '-r',
-        '30',
-        '-fps_mode',
-        'cfr',
-        '-pix_fmt',
-        'yuv420p',
-        '-movflags',
-        '+faststart',
-        file,
-    ];
-
-    const child = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
-    let stderr = '';
-    child.stderr.on('data', (chunk) => {
-        stderr += chunk.toString();
-    });
-
-    return {
-        child,
-        async stop() {
-            if (child.exitCode !== null) {
-                return { ok: false, stderr };
-            }
-
-            child.kill('SIGINT');
-            await new Promise((resolve) => {
-                const timer = setTimeout(() => {
-                    child.kill('SIGKILL');
-                    resolve();
-                }, 8000);
-                child.on('exit', () => {
-                    clearTimeout(timer);
-                    resolve();
-                });
-            });
-
-            return { ok: fs.existsSync(file), stderr };
-        },
-    };
 }
 
 /**
@@ -543,9 +483,10 @@ function filterPath(file) {
  * Burns the captions into a copy of the recording. Returns the output path, or
  * null when ffmpeg cannot render subtitles in this environment.
  */
-export function burnCaptions({ input, output, title, durationMs, steps }) {
+export function burnCaptions({ input, output, title, durationMs, steps, crop = null }) {
     const assFile = `${output}.ass`;
     fs.writeFileSync(assFile, buildAss({ title, durationMs, steps }));
+    const filters = [crop, `ass=${filterPath(assFile)}`].filter(Boolean).join(',');
 
     const result = run('ffmpeg', [
         '-hide_banner',
@@ -555,7 +496,7 @@ export function burnCaptions({ input, output, title, durationMs, steps }) {
         '-i',
         input,
         '-vf',
-        `ass=${filterPath(assFile)}`,
+        filters,
         '-c:v',
         'libx264',
         '-preset',
@@ -572,6 +513,7 @@ export function burnCaptions({ input, output, title, durationMs, steps }) {
     if (result.status !== 0) {
         console.log(`could not burn captions: ${result.stderr.slice(0, 500)}`);
         fs.rmSync(assFile, { force: true });
+        fs.rmSync(output, { force: true });
         return null;
     }
 

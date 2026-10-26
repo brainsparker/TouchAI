@@ -8,7 +8,7 @@
  * Usage: node .github/ui-preview/doctor.mjs [--mode=all|model|publish]
  */
 
-import { createClient } from './lib/github.mjs';
+import { createClient, resolveBotLogin } from './lib/github.mjs';
 
 const args = new Map(
     process.argv
@@ -107,9 +107,9 @@ async function checkPublish() {
     const client = createClient({ token, owner, repo });
 
     try {
-        const bot = await client.getAuthenticatedUser();
-        const isBot = String(bot?.login ?? '').endsWith('[bot]');
-        record('app identity', isBot, `authenticated as ${bot?.login ?? 'unknown'}`);
+        const login = await resolveBotLogin(client, process.env.UI_PREVIEW_BOT_LOGIN);
+        const isBot = String(login).endsWith('[bot]');
+        record('app identity', isBot, `authenticated as ${login || 'unknown'}`);
     } catch (error) {
         record('app identity', false, error.message);
     }

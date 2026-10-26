@@ -44,6 +44,46 @@ describe('user opens a pull request that runs the preview', () => {
         expect(record).not.toContain('environment:');
     });
 
+    it('user gets native builds on Linux, macOS, and Windows', () => {
+        const explore = jobBlock('explore');
+        const record = jobBlock('record');
+
+        for (const platform of ['linux', 'macos', 'windows']) {
+            expect(explore).toContain(`platform: ${platform}`);
+            expect(record).toContain(`platform: ${platform}`);
+        }
+
+        expect(explore).toContain('os: ubuntu-24.04');
+        expect(explore).toContain('os: macos-15');
+        expect(explore).toContain('os: windows-latest');
+        expect(record).toContain('os: ubuntu-24.04');
+        expect(record).toContain('os: macos-15');
+        expect(record).toContain('os: windows-latest');
+    });
+
+    it('user gets the embedded WebDriver build instead of an external driver', () => {
+        expect(workflow).toContain(
+            'pnpm tauri build --debug --no-bundle --features ui-preview-webdriver'
+        );
+        expect(workflow).not.toContain('cargo install tauri-driver');
+        expect(workflow).not.toContain('webkit2gtk-driver');
+    });
+
+    it('user gets the hosted display configured before each native run', () => {
+        expect(workflow).toContain('macos-display.swift --configure-hosted');
+        expect(workflow).toContain('configure-display.ps1');
+        expect(workflow).toContain("UI_PREVIEW_DISPLAY_WIDTH: '1280'");
+        expect(workflow).toContain("UI_PREVIEW_DISPLAY_HEIGHT: '900'");
+    });
+
+    it('user gets every platform evidence artifact merged into one publish job', () => {
+        const publish = jobBlock('publish');
+
+        expect(publish).toContain('pattern: ui-preview-evidence-*');
+        expect(publish).toContain('merge-multiple: false');
+        expect(publish).toContain('UI_PREVIEW_PLATFORMS: linux,macos,windows');
+    });
+
     it('user gets the model key only in a job that does not run pull-request code', () => {
         const plan = jobBlock('plan');
 
@@ -59,6 +99,23 @@ describe('user opens a pull request that runs the preview', () => {
         expect(publish).toContain('secrets.UI_PREVIEW_TOKEN');
         expect(publish).toContain('secrets.UI_PREVIEW_APP_ID');
         expect(publish).not.toContain('head_repo');
+    });
+
+    it('user gets the App identity without asking an installation token for /user', () => {
+        const detect = jobBlock('detect');
+        const publish = jobBlock('publish');
+
+        expect(detect).toContain('UI_PREVIEW_BOT_LOGIN: ${{ steps.app.outputs.app-slug }}[bot]');
+        expect(publish).toContain('UI_PREVIEW_BOT_LOGIN: ${{ steps.app.outputs.app-slug }}[bot]');
+    });
+
+    it('user gets the same App identity in the credential doctor', () => {
+        const doctor = fs.readFileSync(
+            path.join(repositoryRoot, '.github/workflows/ui-preview-doctor.yml'),
+            'utf8'
+        );
+
+        expect(doctor).toContain('UI_PREVIEW_BOT_LOGIN: ${{ steps.app.outputs.app-slug }}[bot]');
     });
 
     it('user gets the comment edited in place rather than appended', () => {

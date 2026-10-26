@@ -69,6 +69,7 @@ jobs:
             - name: Check the App and upload credentials
               env:
                   GH_TOKEN: ${{ steps.app.outputs.token }}
+                  UI_PREVIEW_BOT_LOGIN: ${{ steps.app.outputs.app-slug }}[bot]
                   UI_PREVIEW_TOKEN: ${{ secrets.UI_PREVIEW_TOKEN }}
                   UI_PREVIEW_REPOSITORY_ID: ${{ github.event.repository.id }}
               run: node .github/ui-preview/doctor.mjs --mode=publish

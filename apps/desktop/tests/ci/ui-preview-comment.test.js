@@ -145,6 +145,110 @@ describe('user reads the waiting and skipped comments', () => {
     });
 });
 
+describe('user reads one preview comment for three native builds', () => {
+    const platforms = [
+        {
+            platform: 'linux',
+            captureMode: 'x11grab',
+            videoUrl: 'https://github.com/user-attachments/assets/linux-video',
+            scenes: [
+                {
+                    title: 'Search',
+                    shots: [
+                        { file: 'linux-search.png', caption: 'Query typed' },
+                        { file: 'linux-settings.png', caption: 'Settings section' },
+                    ],
+                },
+            ],
+            assets: {
+                'linux-search.png': 'https://github.com/user-attachments/assets/linux-search',
+                'linux-settings.png': 'https://github.com/user-attachments/assets/linux-settings',
+            },
+            checks: [{ name: 'Native recording (x11grab)', status: 'pass' }],
+        },
+        {
+            platform: 'macos',
+            captureMode: 'avfoundation',
+            videoUrl: 'https://github.com/user-attachments/assets/macos-video',
+            scenes: [
+                {
+                    title: 'Search',
+                    shots: [{ file: 'macos-search.png', caption: 'Query typed' }],
+                },
+            ],
+            assets: {
+                'macos-search.png': 'https://github.com/user-attachments/assets/macos-search',
+            },
+            checks: [{ name: 'Native recording (avfoundation)', status: 'pass' }],
+        },
+        {
+            platform: 'windows',
+            captureMode: 'gdigrab',
+            videoUrl: 'https://github.com/user-attachments/assets/windows-video',
+            scenes: [
+                {
+                    title: 'Search',
+                    shots: [{ file: 'windows-search.png', caption: 'Query typed' }],
+                },
+            ],
+            assets: {
+                'windows-search.png': 'https://github.com/user-attachments/assets/windows-search',
+            },
+            checks: [{ name: 'Native recording (gdigrab)', status: 'pass' }],
+        },
+    ];
+
+    it('user sees a labelled section and a visible video for every platform', () => {
+        const body = buildPreviewComment({ ...baseComment, platforms });
+
+        expect(body).toContain('### Linux · x11grab');
+        expect(body).toContain('### macOS · avfoundation');
+        expect(body).toContain('### Windows · gdigrab');
+        expect(body).toContain('\nhttps://github.com/user-attachments/assets/linux-video\n');
+        expect(body).toContain('\nhttps://github.com/user-attachments/assets/macos-video\n');
+        expect(body).toContain('\nhttps://github.com/user-attachments/assets/windows-video\n');
+    });
+
+    it('user gets all screenshots in one collapsed block per platform', () => {
+        const body = buildPreviewComment({ ...baseComment, platforms });
+
+        expect(body).toContain('<details><summary>Key screenshots (2)</summary>');
+        expect(body.match(/<details><summary>Key screenshots \(1\)<\/summary>/g)).toHaveLength(2);
+        expect(body).toContain('https://github.com/user-attachments/assets/linux-search');
+        expect(body).toContain('Search: Query typed');
+        expect(body).not.toContain('<img');
+    });
+
+    it('user sees a missing platform instead of an omitted section', () => {
+        const body = buildPreviewComment({
+            ...baseComment,
+            platforms: [
+                ...platforms.slice(0, 1),
+                {
+                    platform: 'macos',
+                    failure: 'the recording job did not produce a manifest',
+                },
+            ],
+        });
+
+        expect(body).toContain('### macOS');
+        expect(body).toContain('the recording job did not produce a manifest');
+    });
+
+    it('user sees a platform failure without losing the other videos', () => {
+        const body = buildPreviewComment({
+            ...baseComment,
+            platforms: [
+                { ...platforms[0], failure: 'recording: ffmpeg did not start' },
+                platforms[1],
+            ],
+        });
+
+        expect(body).toContain('**Recording stopped:** recording: ffmpeg did not start');
+        expect(body).toContain('https://github.com/user-attachments/assets/macos-video');
+    });
+});
+
 describe('user opens a pull request with existing comments', () => {
     const comments = [
         {
