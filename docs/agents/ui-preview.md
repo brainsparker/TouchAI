@@ -55,7 +55,7 @@ The workflow is split so that no job both runs pull-request code and holds a sec
 | `explore` (matrix) | pull-request head | none | `contents: read` |
 | `plan` | default branch | model key | `contents: read`, `pull-requests: read` |
 | `record` (matrix) | default branch | none | `contents: read` |
-| `publish` | default branch | upload token, App key | `contents: read` |
+| `publish` | default branch | upload token, App token | `contents: read` |
 
 `explore` is the only job that checks out the pull request, and it is the only job that builds it.
 It runs once per platform. `record` runs the binary that `explore` produced on the same platform,
@@ -64,9 +64,11 @@ but drives it with scripts from the default branch, so a pull request cannot cha
 
 `UI Preview Native Validation` is a maintainer-only harness. A maintainer adds
 `ui-preview-native-validation` to a same-repository pull request, it records all three platforms,
-and a `publish` job posts the same comment with the workflow's `GITHUB_TOKEN`, so the author is
-`github-actions[bot]`. That job runs the scripts from the branch under validation; it is not the
-production trigger and never runs for forks.
+and a `publish` job posts the same comment as the App, so the author is the same bot identity as
+production. A separate `token` job mints the App token from `BOT_APP_ID` and
+`BOT_APP_PRIVATE_KEY`; the private key never enters a job that runs branch code. The publish job
+runs the scripts from the branch under validation; it is not the production trigger and never runs
+for forks.
 
 ## Pipeline
 
@@ -116,9 +118,8 @@ stage at 1x. Element crops and the minimum crop are scaled by the device pixel r
 The workflow does not modify TCC. On macOS it relies on the screen-capture grant and replayd
 approval present in the hosted runner image. The `UI Preview Native Validation` workflow exercises
 the Linux, macOS, and Windows capture path on a labeled pull request and posts the same preview
-comment through the workflow's `GITHUB_TOKEN`, so the comment author is `github-actions[bot]`. If
-capture is denied, the recorder keeps the screenshots and publishes the capture failure instead of a
-video.
+comment as the App. If capture is denied, the recorder keeps the screenshots and publishes the
+capture failure instead of a video.
 
 Linux records the 1920x1080 Xvfb root directly. macOS and Windows record the desktop and crop
 the top-left physical stage while burning captions, so all three videos have the same shape for a
@@ -218,7 +219,7 @@ identity classes.
 | `UI_PREVIEW_MODEL_API_KEY` | secret, `ui-preview` | the model call |
 | `UI_PREVIEW_MODEL_BASE_URL`, `UI_PREVIEW_MODEL` | variables, `ui-preview` | endpoint and model |
 | `UI_PREVIEW_TOKEN` | secret, `ui-preview-publish` | `POST /user-attachments/assets` only |
-| `UI_PREVIEW_APP_ID`, `UI_PREVIEW_APP_PRIVATE_KEY` | secrets, `ui-preview-publish` | the comment only |
+| `BOT_APP_ID`, `BOT_APP_PRIVATE_KEY` | secrets, `ui-preview-publish` | the comment only |
 
 The upload endpoint returns `404` for GitHub App installation tokens and for App user-to-server
 tokens. It needs a token that belongs to a user with `admin`, `maintain` or `write` on the

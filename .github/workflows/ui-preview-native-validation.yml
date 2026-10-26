@@ -194,10 +194,39 @@ jobs:
                       ui-preview-out/manifest.json
                       ui-preview-out/evidence
 
+    token:
+        name: Mint the comment token
+        needs:
+            - record
+        if: >-
+            always() &&
+            github.event.label.name == 'ui-preview-native-validation' &&
+            github.event.pull_request.head.repo.full_name == github.repository
+        runs-on: ubuntu-24.04
+        timeout-minutes: 5
+        permissions:
+            contents: read
+        outputs:
+            token: ${{ steps.app.outputs.token }}
+            app-slug: ${{ steps.app.outputs.app-slug }}
+        steps:
+            # The private key stays in a job that never runs pull-request code.
+            - name: Mint the App token
+              id: app
+              uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+              with:
+                  app-id: ${{ secrets.BOT_APP_ID }}
+                  private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+                  owner: ${{ github.repository_owner }}
+                  repositories: ${{ github.event.repository.name }}
+                  permission-issues: write
+                  permission-pull-requests: write
+
     publish:
         name: Publish the validation comment
         needs:
             - record
+            - token
         # Validation-only: maintainers add the label after review, and the
         # publisher runs the scripts from the same branch it just recorded.
         # The production trigger is ui-preview.yml, which never runs head code
@@ -230,10 +259,10 @@ jobs:
                   node-version: 22
                   package-manager-cache: false
 
-            - name: Publish the comment as the Actions bot
+            - name: Publish the comment as the App
               env:
-                  GH_TOKEN: ${{ github.token }}
-                  UI_PREVIEW_BOT_LOGIN: github-actions[bot]
+                  GH_TOKEN: ${{ needs.token.outputs.token }}
+                  UI_PREVIEW_BOT_LOGIN: ${{ needs.token.outputs.app-slug }}[bot]
                   UI_PREVIEW_TOKEN: ${{ secrets.UI_PREVIEW_TOKEN }}
                   UI_PREVIEW_OUT: ${{ github.workspace }}/ui-preview-out
                   UI_PREVIEW_PLATFORMS: linux,macos,windows

@@ -24,6 +24,15 @@ function jobBlock(name) {
     return next === -1 ? workflow.slice(start) : workflow.slice(start, start + 1 + next);
 }
 
+function nativeJobBlock(name) {
+    const start = nativeWorkflow.indexOf(`\n    ${name}:`);
+    const next = nativeWorkflow.slice(start + 1).search(/\n {4}[a-z][a-z-]*:/);
+
+    return next === -1
+        ? nativeWorkflow.slice(start)
+        : nativeWorkflow.slice(start, start + 1 + next);
+}
+
 describe('user opens a pull request that runs the preview', () => {
     it('user gets a preview trigger that never uses the default write token', () => {
         expect(workflow).toContain('pull_request_target');
@@ -114,7 +123,7 @@ describe('user opens a pull request that runs the preview', () => {
 
         expect(publish).toContain('environment: ui-preview-publish');
         expect(publish).toContain('secrets.UI_PREVIEW_TOKEN');
-        expect(publish).toContain('secrets.UI_PREVIEW_APP_ID');
+        expect(publish).toContain('secrets.BOT_APP_ID');
         expect(publish).not.toContain('head_repo');
     });
 
@@ -176,11 +185,26 @@ describe('user opens a pull request that runs the preview', () => {
 });
 
 describe('user checks a capture change on the native validation harness', () => {
-    it('user gets the comment from the Actions bot instead of a maintainer account', () => {
-        expect(nativeWorkflow).toContain('GH_TOKEN: ${{ github.token }}');
-        expect(nativeWorkflow).toContain('UI_PREVIEW_BOT_LOGIN: github-actions[bot]');
+    it('user gets the comment from the App instead of a maintainer account', () => {
+        expect(nativeWorkflow).toContain('GH_TOKEN: ${{ needs.token.outputs.token }}');
+        expect(nativeWorkflow).toContain(
+            'UI_PREVIEW_BOT_LOGIN: ${{ needs.token.outputs.app-slug }}[bot]'
+        );
+        expect(nativeWorkflow).toContain('secrets.BOT_APP_ID');
+        expect(nativeWorkflow).toContain('secrets.BOT_APP_PRIVATE_KEY');
+        expect(nativeWorkflow).toContain('permission-issues: write');
         expect(nativeWorkflow).toContain('pull-requests: write');
         expect(nativeWorkflow).toContain('pattern: ui-preview-native-validation-*');
+    });
+
+    it('user gets the App private key only in a job that runs no pull-request code', () => {
+        const token = nativeJobBlock('token');
+        const publish = nativeJobBlock('publish');
+
+        expect(token).toContain('secrets.BOT_APP_PRIVATE_KEY');
+        expect(token).not.toContain('pull_request.head.sha');
+        expect(publish).not.toContain('secrets.BOT_APP_PRIVATE_KEY');
+        expect(publish).toContain('needs.token.outputs.token');
     });
 
     it('user gets the Actions bot comment only for a same-repository validation label', () => {

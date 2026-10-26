@@ -29,8 +29,8 @@ when a runner exposes one. The publisher rejects a video whose dimensions do not
 physical stage, so a resized or upscaled clip cannot be published as higher-resolution evidence.
 
 The label-triggered `.github/workflows/ui-preview-native-validation.yml` re-runs native Linux,
-macOS, and Windows capture and posts the comment through the workflow `GITHUB_TOKEN`, so the author
-is `github-actions[bot]`. Use it to check a capture change before merge.
+macOS, and Windows capture and posts the comment as the App, using the same `BOT_APP_ID` and
+`BOT_APP_PRIVATE_KEY` secrets as production. Use it to check a capture change before merge.
 
 ```bash
 pnpm test:unit -- ui-preview

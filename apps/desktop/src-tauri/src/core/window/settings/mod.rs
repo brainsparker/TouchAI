@@ -58,8 +58,17 @@ async fn build_settings_window_at<R: Runtime>(
     .resizable(true)
     .decorations(false)
     // Linux 没有 DWM 那样的窗口级圆角，改由透明窗口 + CSS 外壳裁剪。
-    .transparent(cfg!(target_os = "linux"))
-    .center();
+    .transparent(cfg!(target_os = "linux"));
+
+    // A preview records a fixed crop. Opening the window at the stage keeps it
+    // from appearing centered and then jumping into the crop mid-recording.
+    if let Some((x, y)) =
+        crate::core::system::runtime::ui_preview_window_position(SETTINGS_WINDOW_WIDTH)
+    {
+        builder = builder.position(x, y);
+    } else {
+        builder = builder.center();
+    }
 
     if let Some(browser_args) = crate::core::system::runtime::e2e_webview_additional_browser_args()
     {
