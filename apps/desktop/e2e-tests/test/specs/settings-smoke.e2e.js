@@ -14,8 +14,12 @@ import {
     assertVisible,
     callE2eBridge,
     getAriaChecked,
+    SETTINGS_WINDOW_DEFAULT_SIZE,
     switchToWindowContaining,
     toggleSwitch,
+    useInterfaceLanguage,
+    useProductFont,
+    visualMismatchTolerance,
     waitForE2eBridge,
     waitForTestIdDisplayed,
 } from '../support/desktop.js';
@@ -25,6 +29,12 @@ describe('user works in the settings window', () => {
 
     before(async () => {
         await waitForE2eBridge();
+        // The settings window loads its language from the persisted setting, so it
+        // has to be pinned before the window opens. The font follows the same rule:
+        // it is registered before the window exists so the first paint is already
+        // correct.
+        await useInterfaceLanguage();
+        await useProductFont();
         mainWindowHandle = await browser.getWindowHandle();
 
         await callE2eBridge('openSettingsWindow');
@@ -113,9 +123,63 @@ describe('user works in the settings window', () => {
             );
         });
 
+        // Visual regression runs before the search test, because that one types a
+        // query and the sidebar hides the section list while a query is active.
+        //
+        // The window is set to the product's own default size, so the baselines show
+        // the layout a user gets on first open rather than an arbitrary viewport.
+        // A GitHub-hosted runner only has a 1024x768 desktop, but Windows does not
+        // clamp a window to the desktop, and WebDriver captures the window itself
+        // rather than the screen.
+        it('user sees every settings section keep its layout after choosing it in the sidebar', async () => {
+            await browser.setWindowSize(...SETTINGS_WINDOW_DEFAULT_SIZE);
+            await browser.pause(500);
+
+            const tolerance = await visualMismatchTolerance();
+
+            const contentShell = await waitForTestIdDisplayed('settings-content-shell');
+            const sections = [
+                { id: 'general', testId: 'settings-general-section' },
+                { id: 'ai-services', testId: 'settings-ai-services-panel' },
+                { id: 'built-in-tools', testId: 'settings-built-in-tools-panel' },
+                { id: 'search', testId: 'settings-search-section' },
+            ];
+
+            for (const section of sections) {
+                const navItem = await waitForTestIdDisplayed(`settings-nav-${section.id}`);
+                await navItem.click();
+
+                await waitForTestIdDisplayed(section.testId);
+                await contentShell.waitForDisplayed();
+
+                // Let the section transition and its local data settle, then reset
+                // the scroll position so the screenshot always starts at the top.
+                await browser.pause(700);
+                await browser.execute(() => {
+                    const scrollContainer = document.querySelector(
+                        "[data-testid='settings-content-shell'] .settings-scrollbar"
+                    );
+                    if (scrollContainer) {
+                        scrollContainer.scrollTop = 0;
+                    }
+                });
+                await browser.pause(150);
+
+                // Baselines are stored at CSS size, so the 100% runner compares at
+                // the strict budget. A scaled machine resamples and gets the wider
+                // one; see `visualMismatchTolerance`.
+                await expect(contentShell).toMatchElementSnapshot(
+                    `settings-${section.id}`,
+                    tolerance
+                );
+            }
+        });
+
         it('user finds a setting by typing into settings search', async () => {
             const searchInput = await waitForTestIdDisplayed('settings-search-input');
             await searchInput.click();
+            // The suite pins the interface language, so this matches the start-minimized
+            // row deterministically instead of depending on the machine locale.
             await searchInput.addValue('minimiz');
 
             const results = await waitForTestIdDisplayed('settings-search-results');
