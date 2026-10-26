@@ -203,9 +203,9 @@ The workflow passes `steps.app.outputs.app-slug` as `UI_PREVIEW_BOT_LOGIN`, so c
 not call `GET /user`. Installation tokens cannot use that endpoint. The scripts only fall back to
 `GET /user` for local runs with a user token.
 
-Every asset is referenced as a bare URL on its own line. That is required, not cosmetic: an
-uploaded asset is only served to readers after a comment references it as a bare URL. An `<img>`
-tag returns `404` for everyone except the uploader, even though the upload itself succeeded.
+Screenshots use standard Markdown image syntax (`![caption](url)`) so they render inside the
+collapsed block instead of appearing as links. The video stays as a bare URL on its own line,
+because that is what makes GitHub render its inline player.
 
 Both environments restrict deployments to protected branches, so only a workflow running from the
 default branch can read them.

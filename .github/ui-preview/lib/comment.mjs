@@ -59,13 +59,15 @@ function renderChecks(checks) {
     return rows.join('\n');
 }
 
+function screenshotAlt(scene, shot) {
+    const title = String(scene.title ?? '').replace(/[[\]]/g, '');
+    const caption = String(shot.caption ?? '').replace(/[[\]]/g, '');
+    return [title, caption].filter(Boolean).join(': ') || 'UI preview screenshot';
+}
+
 /**
- * Every asset is a bare URL on its own line.
- *
- * This is not cosmetic: GitHub only attaches an uploaded asset to the
- * repository, and therefore only serves it to readers, when the comment
- * references it as a bare URL. An `<img>` tag uploads fine and then returns 404
- * for anyone but the uploader.
+ * Screenshots use Markdown image syntax so GitHub renders them inline. The
+ * video stays a bare URL, because that is what makes GitHub show its player.
  */
 function renderScene(scene, assets) {
     const lines = [`### ${scene.title}`];
@@ -79,7 +81,7 @@ function renderScene(scene, assets) {
         }
 
         lines.push('');
-        lines.push(url);
+        lines.push(`![${screenshotAlt(scene, shot)}](${url})`);
 
         if (shot.caption) {
             lines.push('');
@@ -140,7 +142,8 @@ function renderPlatform(platform, fallbackAssets) {
         lines.push('', `<details><summary>Key screenshots (${rendered.length})</summary>`, '');
 
         for (const shot of rendered) {
-            lines.push(assets[shot.file], '');
+            lines.push(`![${screenshotAlt({ title: shot.scene }, shot)}](${assets[shot.file]})`);
+            lines.push('');
             lines.push(shot.caption ? `${shot.scene}: ${shot.caption}` : shot.scene, '');
         }
 

@@ -41,7 +41,7 @@ describe('user reads the preview comment', () => {
         expect(body).toContain('\nhttps://github.com/user-attachments/assets/video\n');
     });
 
-    it('user sees each screenshot as a bare url so the asset stays readable', () => {
+    it('user sees each screenshot as an image instead of a link', () => {
         const body = buildPreviewComment({
             ...baseComment,
             scenes: [
@@ -53,7 +53,10 @@ describe('user reads the preview comment', () => {
             assets: { 'a.png': 'https://github.com/user-attachments/assets/a' },
         });
 
-        expect(body).toContain('\nhttps://github.com/user-attachments/assets/a\n');
+        expect(body).toContain(
+            '![Shortcuts: Shortcuts section](https://github.com/user-attachments/assets/a)'
+        );
+        expect(body).not.toContain('\nhttps://github.com/user-attachments/assets/a\n');
         expect(body).not.toContain('<img');
         expect(body).toContain('Shortcuts section');
     });
@@ -214,7 +217,15 @@ describe('user reads one preview comment for three native builds', () => {
 
         expect(body).toContain('<details><summary>Key screenshots (2)</summary>');
         expect(body.match(/<details><summary>Key screenshots \(1\)<\/summary>/g)).toHaveLength(2);
-        expect(body).toContain('https://github.com/user-attachments/assets/linux-search');
+        expect(body).toContain(
+            '![Search: Query typed](https://github.com/user-attachments/assets/linux-search)'
+        );
+        expect(body).toContain(
+            '![Search: Query typed](https://github.com/user-attachments/assets/macos-search)'
+        );
+        expect(body).toContain(
+            '![Search: Query typed](https://github.com/user-attachments/assets/windows-search)'
+        );
         expect(body).toContain('Search: Query typed');
         expect(body).not.toContain('<img');
     });
