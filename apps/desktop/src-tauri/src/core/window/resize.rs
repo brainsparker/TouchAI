@@ -25,6 +25,27 @@ const DEFAULT_ANIMATION_DURATION_MS: u64 = 180;
 const ANIMATION_FRAME_INTERVAL_MS: u64 = 16;
 const HEIGHT_TOLERANCE: f64 = 1.0;
 
+/// Decides whether a content-driven resize re-centers and animates the window.
+///
+/// The UI preview records a fixed crop of the screen, so the main window is
+/// anchored to the top of that crop: it must grow downwards and must not
+/// animate, otherwise the window slides out of the crop while the user types.
+fn resolve_resize_policy(
+    label: &str,
+    center: Option<bool>,
+    animate: Option<bool>,
+    anchor_top: bool,
+) -> (bool, bool) {
+    if anchor_top && label == "main" {
+        return (false, false);
+    }
+
+    (
+        center.unwrap_or(label == "main"),
+        animate.unwrap_or(label == "main"),
+    )
+}
+
 /// 最大化窗口跳过内容驱动的 resize，避免撑满屏幕时被自动高度覆盖。
 fn is_content_driven_resize_allowed<R: Runtime>(window: &WebviewWindow<R>) -> Result<bool, String> {
     Ok(!window.is_maximized().map_err(|e| e.to_string())?)
@@ -228,7 +249,7 @@ fn apply_window_size<R: Runtime>(
 
 #[cfg(test)]
 mod tests {
-    use super::{centered_window_y, clamp_window_y, WindowAnimationState};
+    use super::{centered_window_y, clamp_window_y, resolve_resize_policy, WindowAnimationState};
 
     #[cfg(target_os = "windows")]
     use super::logical_to_physical_i32;
@@ -238,6 +259,34 @@ mod tests {
         let next_y = centered_window_y(300.0, 60.0, 180.0, &None, 1.0);
 
         assert_eq!(next_y, 240.0);
+    }
+
+    #[test]
+    fn user_sees_a_still_search_window_during_a_ui_preview_resize_when_the_top_is_anchored() {
+        assert_eq!(
+            resolve_resize_policy("main", Some(true), Some(true), true),
+            (false, false)
+        );
+    }
+
+    #[test]
+    fn user_sees_the_normal_centered_animation_outside_a_ui_preview_run() {
+        assert_eq!(
+            resolve_resize_policy("main", None, None, false),
+            (true, true)
+        );
+        assert_eq!(
+            resolve_resize_policy("settings", None, None, false),
+            (false, false)
+        );
+    }
+
+    #[test]
+    fn user_sees_the_normal_settings_resize_during_a_ui_preview_run() {
+        assert_eq!(
+            resolve_resize_policy("settings", None, None, true),
+            (false, false)
+        );
     }
 
     // Two resizes can overlap: the renderer asks for a new height while an earlier animation is
@@ -470,9 +519,13 @@ pub fn reset_search_window_to_defaults<R: Runtime>(
             &monitor,
             scale_factor,
         )?;
-        window
-            .center()
-            .map_err(|e| format!("Failed to center search window: {}", e))?;
+        // The UI preview pins the search window to its stage, so re-centering
+        // here would move the window out of the recorded crop.
+        if !crate::core::system::runtime::is_ui_preview_mode() {
+            window
+                .center()
+                .map_err(|e| format!("Failed to center search window: {}", e))?;
+        }
         crate::core::window::rounded_corners::sync_window_corner_style(window)?;
         runtime.window_state().apply_programmatic_size(
             Some(snapshot.current_width),
@@ -531,8 +584,12 @@ pub async fn resize_window_height<R: Runtime>(
     }
 
     // 居中策略允许前端显式覆盖，默认值仍由后端保证一致性。
-    let center_window = center.unwrap_or(label == "main");
-    let animate_resize = animate.unwrap_or(label == "main");
+    let (center_window, animate_resize) = resolve_resize_policy(
+        &label,
+        center,
+        animate,
+        crate::core::system::runtime::is_ui_preview_mode(),
+    );
     let animation_duration_ms = DEFAULT_ANIMATION_DURATION_MS;
 
     let scale_factor = window.scale_factor().map_err(|e| e.to_string())?;

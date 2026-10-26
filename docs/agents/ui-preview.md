@@ -62,6 +62,12 @@ It runs once per platform. `record` runs the binary that `explore` produced on t
 but drives it with scripts from the default branch, so a pull request cannot change the recorder.
 `plan` and `publish` never execute pull-request code.
 
+`UI Preview Native Validation` is a maintainer-only harness. A maintainer adds
+`ui-preview-native-validation` to a same-repository pull request, it records all three platforms,
+and a `publish` job posts the same comment with the workflow's `GITHUB_TOKEN`, so the author is
+`github-actions[bot]`. That job runs the scripts from the branch under validation; it is not the
+production trigger and never runs for forks.
+
 ## Pipeline
 
 ```text
@@ -91,34 +97,38 @@ screenshots. The same plan runs on all three builds.
 
 | Platform | Capture | Display | Frames |
 | --- | --- | --- | --- |
-| Linux | ffmpeg `x11grab` under Xvfb | 2560x1600 (1280x800 at 2x) | 10 fps in, 30 fps CFR out |
-| macOS | ffmpeg `avfoundation` (`Capture screen 0:none`) | 2560x1600 when a 2x mode exists, otherwise 1920x1080 | 30 fps in, 30 fps CFR out |
-| Windows | ffmpeg `gdigrab` (`desktop`) | Largest available mode up to 3840x2160; 1920x1080 on the standard runner | 10 fps in, 30 fps CFR out |
+| Linux | ffmpeg `x11grab` under Xvfb | 1920x1080 | 10 fps in, 30 fps CFR out |
+| macOS | ffmpeg `avfoundation` (`Capture screen 0:none`) | 1920x1080 | 30 fps in, 30 fps CFR out |
+| Windows | ffmpeg `gdigrab` (`desktop`) | 1920x1080 | 10 fps in, 30 fps CFR out |
 
-macOS uses a Swift helper with CoreGraphics to select the best available mode for the disposable
-runner session. It prefers a true 2x HiDPI mode that keeps the logical layout and doubles the
-captured detail, then falls back to 1920x1080. Windows enumerates display modes and selects the
-largest one up to 3840x2160, with 1920x1080 as the standard-runner result. Linux starts Xvfb at
-2560x1600 with `GDK_SCALE=2`. The helpers export the actual display size, logical stage, and scale
-factor, and the recorder fails before booting the app when the display is smaller than the physical
-stage.
+All three platforms preview at 1920x1080, which is the largest size the standard GitHub-hosted macOS
+and Windows runners expose. macOS uses a Swift helper with CoreGraphics to select the best available
+mode for the disposable runner session; Windows enumerates display modes. Either helper selects a
+larger or 2x mode when the runner offers one, but neither upscales a smaller display. Linux starts
+Xvfb at 1920x1080. The helpers export the actual display size, logical stage, and scale factor, and
+the recorder fails before booting the app when the display is smaller than the physical stage.
 
-The stage is the area the reviewer sees, not the app's layout size. A 1280x800 stage at 2x produces
-a 2560x1600 video while the Settings window keeps its 1120x700 logical layout. Its screenshot is
-2240x1400 instead of 1120x700. The same applies to element crops: the minimum crop and the element
-rect are both scaled by the device pixel ratio.
+The stage is the area the reviewer sees, not the app's layout size. A 1280x800 stage at 2x would
+produce a 2560x1600 video while the Settings window keeps its 1120x700 logical layout. The profile
+keeps the scale factor so a HiDPI runner can be used unchanged; the hosted runs use a 1920x1080
+stage at 1x. Element crops and the minimum crop are scaled by the device pixel ratio.
 
 The workflow does not modify TCC. On macOS it relies on the screen-capture grant and replayd
 approval present in the hosted runner image. The `UI Preview Native Validation` workflow exercises
-the Linux, macOS, and Windows capture path on a labeled pull request without publishing a comment.
-If capture is denied, the recorder keeps the screenshots and publishes the capture failure instead
-of a video.
+the Linux, macOS, and Windows capture path on a labeled pull request and posts the same preview
+comment through the workflow's `GITHUB_TOKEN`, so the comment author is `github-actions[bot]`. If
+capture is denied, the recorder keeps the screenshots and publishes the capture failure instead of a
+video.
 
-Linux records the 2560x1600 Xvfb root directly. macOS and Windows record the larger desktop and crop
+Linux records the 1920x1080 Xvfb root directly. macOS and Windows record the desktop and crop
 the top-left physical stage while burning captions, so all three videos have the same shape for a
 given profile. The video must have exactly the physical stage dimensions; publishing rejects a
 recording that was resized or upscaled. If a runner's ffmpeg cannot render subtitles, the recorder
 retries the crop without captions instead of publishing the uncropped desktop.
+
+The app runs with `TOUCHAI_UI_PREVIEW=1`. In that mode a content-driven resize of the main window
+keeps the top edge fixed and skips the height animation, so the window grows downwards inside the
+recorded crop instead of re-centering itself and sliding out of frame while the recording runs.
 
 ## Fixture data
 
@@ -142,15 +152,17 @@ The recording must show a flow, not a still image with a duration.
 - On Linux the inactive window is unmapped, because the search window hides itself when it loses
   focus. On macOS and Windows the inactive WebDriver window is moved off-screen.
 - The active window is moved below the burned-in title on every platform.
-- The window is re-pinned after every step: the search window grows when results appear and the
-  app recentres itself, which would otherwise slide it to the middle of the screen mid-clip.
+- The main window is anchored in preview mode: `TOUCHAI_UI_PREVIEW=1` makes a content-driven
+  resize keep the top edge and skip the height animation, so the search window grows downwards
+  instead of re-centering and sliding while the user types. The recorder still puts the window on
+  the stage line after every step in case a native window manager moved it.
 - Opening a settings section resets the shared content scroll, so a section opened after a scroll
   does not start mid-page.
 - Linux and Windows capture at 10 fps and write a constant 30 fps stream. Capturing 30 fps on the
   shared Linux runner dropped most frames and produced a video much shorter than the session.
 - Step captions are burned into a strip below the window, not drawn over the UI.
-- Captions use the logical stage as the subtitle canvas, so their size stays proportional when the
-  video is captured at 2x.
+- Captions use the logical stage as the subtitle canvas, so their size stays proportional if a
+  runner is switched to a 2x profile.
 - Captions are best-effort. The crop is mandatory when the runner desktop is larger than the stage,
   so a subtitle failure cannot change the video dimensions or hide the app window.
 - The overlay draws a fading trail and a ring on each click, so a viewer can follow the path. The
@@ -271,7 +283,7 @@ recording is never retried into a pass.
 - The desktop search and settings surfaces are covered. Tray and popup windows need test-only
   openers and get their own follow-up.
 - Locale coverage is a static key-parity check, not a rendered comparison in both languages.
-- Video is the physical preview stage. Linux uses the whole 2560x1600 Xvfb root; macOS and Windows
+- Video is the physical preview stage. Linux uses the whole 1920x1080 Xvfb root; macOS and Windows
   crop the top-left stage from a larger hosted desktop when needed.
 - Standard GitHub-hosted macOS and Windows runners do not guarantee more than 1920x1080. A 4K
   capture needs a larger or self-hosted runner whose display actually exposes 3840x2160; the

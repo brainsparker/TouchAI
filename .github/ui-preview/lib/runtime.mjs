@@ -39,7 +39,14 @@ function stopProcess(child) {
 export async function boot({ application, platform = detectPlatform() }) {
     const port = EMBEDDED_DRIVER_PORT;
     const child = spawn(application, [], {
-        env: { ...process.env, TAURI_WEBDRIVER_PORT: String(port) },
+        // The preview records a fixed crop. TOUCHAI_UI_PREVIEW keeps the main
+        // window anchored to the top of that crop instead of re-centering
+        // itself while content-driven resizes animate.
+        env: {
+            ...process.env,
+            TAURI_WEBDRIVER_PORT: String(port),
+            TOUCHAI_UI_PREVIEW: '1',
+        },
         stdio: ['ignore', 'inherit', 'inherit'],
         windowsHide: true,
     });

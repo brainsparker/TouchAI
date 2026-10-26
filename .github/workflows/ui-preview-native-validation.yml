@@ -115,16 +115,15 @@ jobs:
                   UI_PREVIEW_OUT: ${{ github.workspace }}/ui-preview-out
                   UI_PREVIEW_SHA: ${{ github.event.pull_request.head.sha }}
                   UI_PREVIEW_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-                  UI_PREVIEW_DISPLAY_WIDTH: '2560'
-                  UI_PREVIEW_DISPLAY_HEIGHT: '1600'
-                  UI_PREVIEW_STAGE_WIDTH: '1280'
-                  UI_PREVIEW_STAGE_HEIGHT: '800'
+                  UI_PREVIEW_DISPLAY_WIDTH: '1920'
+                  UI_PREVIEW_DISPLAY_HEIGHT: '1080'
+                  UI_PREVIEW_STAGE_WIDTH: '1920'
+                  UI_PREVIEW_STAGE_HEIGHT: '1080'
                   UI_PREVIEW_STAGE_TOP: '40'
-                  UI_PREVIEW_SCALE_FACTOR: '2'
-                  GDK_SCALE: '2'
+                  UI_PREVIEW_SCALE_FACTOR: '1'
                   TOUCHAI_APP_ROOT: ${{ runner.temp }}/ui-preview-app-root
               run: |
-                  xvfb-run -a --server-args='-screen 0 2560x1600x24' \
+                  xvfb-run -a --server-args='-screen 0 1920x1080x24' \
                     .github/ui-preview/with-display.sh \
                     node .github/ui-preview/explore.mjs
 
@@ -173,16 +172,15 @@ jobs:
                   UI_PREVIEW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
                   UI_PREVIEW_TRIGGER: native validation
                   UI_PREVIEW_SEED: '1'
-                  UI_PREVIEW_DISPLAY_WIDTH: '2560'
-                  UI_PREVIEW_DISPLAY_HEIGHT: '1600'
-                  UI_PREVIEW_STAGE_WIDTH: '1280'
-                  UI_PREVIEW_STAGE_HEIGHT: '800'
+                  UI_PREVIEW_DISPLAY_WIDTH: '1920'
+                  UI_PREVIEW_DISPLAY_HEIGHT: '1080'
+                  UI_PREVIEW_STAGE_WIDTH: '1920'
+                  UI_PREVIEW_STAGE_HEIGHT: '1080'
                   UI_PREVIEW_STAGE_TOP: '40'
-                  UI_PREVIEW_SCALE_FACTOR: '2'
-                  GDK_SCALE: '2'
+                  UI_PREVIEW_SCALE_FACTOR: '1'
                   TOUCHAI_APP_ROOT: ${{ runner.temp }}/ui-preview-app-root
               run: |
-                  xvfb-run -a --server-args='-screen 0 2560x1600x24' \
+                  xvfb-run -a --server-args='-screen 0 1920x1080x24' \
                     .github/ui-preview/with-display.sh node .github/ui-preview/record.mjs
 
             - name: Upload evidence
@@ -195,3 +193,53 @@ jobs:
                   path: |
                       ui-preview-out/manifest.json
                       ui-preview-out/evidence
+
+    publish:
+        name: Publish the validation comment
+        needs:
+            - record
+        # Validation-only: maintainers add the label after review, and the
+        # publisher runs the scripts from the same branch it just recorded.
+        # The production trigger is ui-preview.yml, which never runs head code
+        # in a job that holds a token.
+        if: >-
+            always() &&
+            github.event.label.name == 'ui-preview-native-validation' &&
+            github.event.pull_request.head.repo.full_name == github.repository
+        runs-on: ubuntu-24.04
+        timeout-minutes: 20
+        permissions:
+            contents: read
+            pull-requests: write
+        steps:
+            - name: Check out the validation scripts
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  ref: ${{ github.event.pull_request.head.sha }}
+                  persist-credentials: false
+
+            - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+              continue-on-error: true
+              with:
+                  pattern: ui-preview-native-validation-*
+                  path: ui-preview-out/platforms
+                  merge-multiple: false
+
+            - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+              with:
+                  node-version: 22
+                  package-manager-cache: false
+
+            - name: Publish the comment as the Actions bot
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  UI_PREVIEW_BOT_LOGIN: github-actions[bot]
+                  UI_PREVIEW_TOKEN: ${{ secrets.UI_PREVIEW_TOKEN }}
+                  UI_PREVIEW_OUT: ${{ github.workspace }}/ui-preview-out
+                  UI_PREVIEW_PLATFORMS: linux,macos,windows
+                  UI_PREVIEW_PR: ${{ github.event.pull_request.number }}
+                  UI_PREVIEW_SHA: ${{ github.event.pull_request.head.sha }}
+                  UI_PREVIEW_TRIGGER: native validation
+                  UI_PREVIEW_REPOSITORY_ID: ${{ github.event.repository.id }}
+                  UI_PREVIEW_ARTIFACT_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts
+              run: node .github/ui-preview/publish.mjs

@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 const TOUCHAI_APP_ROOT_ENV: &str = "TOUCHAI_APP_ROOT";
 const TOUCHAI_E2E_ENV: &str = "TOUCHAI_E2E";
+const TOUCHAI_UI_PREVIEW_ENV: &str = "TOUCHAI_UI_PREVIEW";
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,6 +25,21 @@ impl RuntimeInfo {
 pub fn is_e2e_test_mode() -> bool {
     matches!(
         std::env::var(TOUCHAI_E2E_ENV)
+            .ok()
+            .map(|value| value.trim().to_ascii_lowercase())
+            .as_deref(),
+        Some("1" | "true" | "yes" | "on")
+    )
+}
+
+/// UI preview runs pin the window to a fixed stage.
+///
+/// The preview records a fixed crop of the screen, so a window that re-centers
+/// itself while it animates would slide in and out of the crop. In this mode
+/// content-driven resizes keep the top edge fixed and skip the animation.
+pub fn is_ui_preview_mode() -> bool {
+    matches!(
+        std::env::var(TOUCHAI_UI_PREVIEW_ENV)
             .ok()
             .map(|value| value.trim().to_ascii_lowercase())
             .as_deref(),

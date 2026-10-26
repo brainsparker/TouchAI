@@ -809,7 +809,6 @@ async function main() {
     let recordingStartedAt = Date.now();
     let keyShotCount = 0;
     let shotLimitReported = false;
-    let pinTimer = null;
     const timeline = [];
     let currentCaption = null;
 
@@ -871,38 +870,6 @@ async function main() {
                     : { search: mainHandle, settings: opened.settings },
         };
         await isolateSurface({ session, platform, display, surface: 'search', state });
-
-        if (platform === 'linux') {
-            // The app can recenter itself after a resize, asynchronously from
-            // the step that caused it. A periodic pin keeps the window below
-            // the burned-in title even when the move lands between steps.
-            pinTimer = setInterval(() => {
-                const surface = state.activeSurface;
-                const id = state.windows?.[surface];
-
-                if (!id) {
-                    return;
-                }
-
-                try {
-                    const geometry = windowGeometry(display, id);
-
-                    if (!geometry || Math.abs(geometry.y - profile.physical.top) <= 2) {
-                        return;
-                    }
-
-                    moveWindow(
-                        display,
-                        id,
-                        Math.max(0, Math.round((profile.physical.width - geometry.width) / 2)),
-                        profile.physical.top
-                    );
-                } catch {
-                    // The window may be between map and unmap during a scene change.
-                }
-            }, 250);
-            pinTimer.unref?.();
-        }
 
         await sleep(300);
 
@@ -1157,10 +1124,6 @@ async function main() {
         fail('recording', error.message);
         console.log(`recording stopped: ${error.message}`);
     } finally {
-        if (pinTimer) {
-            clearInterval(pinTimer);
-        }
-
         const durationMs = Math.max(0, Date.now() - recordingStartedAt);
 
         if (currentCaption) {

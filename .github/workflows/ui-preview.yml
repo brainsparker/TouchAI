@@ -211,16 +211,15 @@ jobs:
                   UI_PREVIEW_OUT: ${{ github.workspace }}/ui-preview-out
                   UI_PREVIEW_SHA: ${{ needs.detect.outputs.sha }}
                   UI_PREVIEW_BASE_SHA: ${{ needs.detect.outputs.base_sha }}
-                  UI_PREVIEW_DISPLAY_WIDTH: '2560'
-                  UI_PREVIEW_DISPLAY_HEIGHT: '1600'
-                  UI_PREVIEW_STAGE_WIDTH: '1280'
-                  UI_PREVIEW_STAGE_HEIGHT: '800'
+                  UI_PREVIEW_DISPLAY_WIDTH: '1920'
+                  UI_PREVIEW_DISPLAY_HEIGHT: '1080'
+                  UI_PREVIEW_STAGE_WIDTH: '1920'
+                  UI_PREVIEW_STAGE_HEIGHT: '1080'
                   UI_PREVIEW_STAGE_TOP: '40'
-                  UI_PREVIEW_SCALE_FACTOR: '2'
-                  GDK_SCALE: '2'
+                  UI_PREVIEW_SCALE_FACTOR: '1'
                   TOUCHAI_APP_ROOT: ${{ runner.temp }}/ui-preview-app-root
               run: |
-                  xvfb-run -a --server-args='-screen 0 2560x1600x24' \
+                  xvfb-run -a --server-args='-screen 0 1920x1080x24' \
                     trusted/.github/ui-preview/with-display.sh \
                     node trusted/.github/ui-preview/explore.mjs
 
@@ -418,17 +417,16 @@ jobs:
                   UI_PREVIEW_RUN_URL: ${{ needs.detect.outputs.run_url }}
                   UI_PREVIEW_TRIGGER: ${{ needs.detect.outputs.trigger }}
                   UI_PREVIEW_SEED: '1'
-                  UI_PREVIEW_DISPLAY_WIDTH: '2560'
-                  UI_PREVIEW_DISPLAY_HEIGHT: '1600'
-                  UI_PREVIEW_STAGE_WIDTH: '1280'
-                  UI_PREVIEW_STAGE_HEIGHT: '800'
+                  UI_PREVIEW_DISPLAY_WIDTH: '1920'
+                  UI_PREVIEW_DISPLAY_HEIGHT: '1080'
+                  UI_PREVIEW_STAGE_WIDTH: '1920'
+                  UI_PREVIEW_STAGE_HEIGHT: '1080'
                   UI_PREVIEW_STAGE_TOP: '40'
-                  UI_PREVIEW_SCALE_FACTOR: '2'
-                  GDK_SCALE: '2'
+                  UI_PREVIEW_SCALE_FACTOR: '1'
                   TOUCHAI_APP_ROOT: ${{ runner.temp }}/ui-preview-app-root
               run: |
                   chmod +x ui-preview-out/TouchAI
-                  xvfb-run -a --server-args='-screen 0 2560x1600x24' \
+                  xvfb-run -a --server-args='-screen 0 1920x1080x24' \
                     .github/ui-preview/with-display.sh node .github/ui-preview/record.mjs
 
             - name: Record (macOS)

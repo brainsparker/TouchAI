@@ -23,7 +23,7 @@ mod win {
         Graphics::Dwm::{
             DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE,
         },
-        Graphics::Gdi::{CreateRoundRectRgn, DeleteObject, SetWindowRgn, HGDIOBJ, HRGN},
+        Graphics::Gdi::{CreateRoundRectRgn, DeleteObject, SetWindowRgn, HGDIOBJ},
         UI::WindowsAndMessaging::GetClientRect,
     };
 
@@ -115,31 +115,19 @@ mod win {
         Ok(())
     }
 
-    fn clear_window_region(hwnd: HWND) -> Result<(), String> {
-        let no_region = HRGN(std::ptr::null_mut());
-
-        unsafe {
-            if SetWindowRgn(hwnd, Some(no_region), true) == 0 {
-                return Err(format!(
-                    "Failed to clear rounded window region: {}",
-                    windows::core::Error::from_thread()
-                ));
-            }
-        }
-
-        Ok(())
-    }
-
     pub fn apply_window_corner_style<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {
         if !should_manage_window(window) {
             return Ok(());
         }
 
         let hwnd = window_hwnd(window)?;
-        match set_dwm_corner_preference(hwnd) {
-            Ok(()) => clear_window_region(hwnd),
-            Err(_) => set_window_region_rounded_corners(hwnd),
-        }
+
+        // DWM gives the antialiased Windows 11 corner and border colour, but
+        // hosted Windows Server sessions accept the attribute and still paint
+        // square corners. The window region is therefore always applied too,
+        // so the corners are rounded on every Windows host.
+        let _ = set_dwm_corner_preference(hwnd);
+        set_window_region_rounded_corners(hwnd)
     }
 
     pub fn sync_window_corner_style<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), String> {

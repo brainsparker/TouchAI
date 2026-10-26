@@ -8,6 +8,14 @@ const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(testDirectory, '../../../..');
 const workflowPath = path.join(repositoryRoot, '.github/workflows/ui-preview.yml');
 const workflow = fs.readFileSync(workflowPath, 'utf8');
+const nativeWorkflow = fs.readFileSync(
+    path.join(repositoryRoot, '.github/workflows/ui-preview-native-validation.yml'),
+    'utf8'
+);
+const runtime = fs.readFileSync(
+    path.join(repositoryRoot, '.github/ui-preview/lib/runtime.mjs'),
+    'utf8'
+);
 
 function jobBlock(name) {
     const start = workflow.indexOf(`\n    ${name}:`);
@@ -77,13 +85,12 @@ describe('user opens a pull request that runs the preview', () => {
     it('user gets the hosted display configured before each native run', () => {
         expect(workflow).toContain('macos-display.swift --configure-hosted');
         expect(workflow).toContain('configure-display.ps1');
-        expect(workflow).toContain("UI_PREVIEW_DISPLAY_WIDTH: '2560'");
-        expect(workflow).toContain("UI_PREVIEW_DISPLAY_HEIGHT: '1600'");
-        expect(workflow).toContain("UI_PREVIEW_STAGE_WIDTH: '1280'");
-        expect(workflow).toContain("UI_PREVIEW_STAGE_HEIGHT: '800'");
-        expect(workflow).toContain("UI_PREVIEW_SCALE_FACTOR: '2'");
-        expect(workflow).toContain("GDK_SCALE: '2'");
-        expect(workflow).toContain('-screen 0 2560x1600x24');
+        expect(workflow).toContain("UI_PREVIEW_DISPLAY_WIDTH: '1920'");
+        expect(workflow).toContain("UI_PREVIEW_DISPLAY_HEIGHT: '1080'");
+        expect(workflow).toContain("UI_PREVIEW_STAGE_WIDTH: '1920'");
+        expect(workflow).toContain("UI_PREVIEW_STAGE_HEIGHT: '1080'");
+        expect(workflow).toContain("UI_PREVIEW_SCALE_FACTOR: '1'");
+        expect(workflow).toContain('-screen 0 1920x1080x24');
     });
 
     it('user gets every platform evidence artifact merged into one publish job', () => {
@@ -165,5 +172,34 @@ describe('user opens a pull request that runs the preview', () => {
             expect(text).not.toMatch(/gh[opsu]_[A-Za-z0-9]{20,}/);
             expect(text).not.toMatch(/BEGIN (RSA )?PRIVATE KEY/);
         }
+    });
+});
+
+describe('user checks a capture change on the native validation harness', () => {
+    it('user gets the comment from the Actions bot instead of a maintainer account', () => {
+        expect(nativeWorkflow).toContain('GH_TOKEN: ${{ github.token }}');
+        expect(nativeWorkflow).toContain('UI_PREVIEW_BOT_LOGIN: github-actions[bot]');
+        expect(nativeWorkflow).toContain('pull-requests: write');
+        expect(nativeWorkflow).toContain('pattern: ui-preview-native-validation-*');
+    });
+
+    it('user gets the Actions bot comment only for a same-repository validation label', () => {
+        expect(nativeWorkflow).toContain(
+            "github.event.label.name == 'ui-preview-native-validation'"
+        );
+        expect(nativeWorkflow).toContain(
+            'github.event.pull_request.head.repo.full_name == github.repository'
+        );
+    });
+
+    it('user gets the same 1920x1080 stage on the native validation run', () => {
+        expect(nativeWorkflow).toContain("UI_PREVIEW_DISPLAY_WIDTH: '1920'");
+        expect(nativeWorkflow).toContain("UI_PREVIEW_DISPLAY_HEIGHT: '1080'");
+        expect(nativeWorkflow).toContain("UI_PREVIEW_SCALE_FACTOR: '1'");
+        expect(nativeWorkflow).toContain('-screen 0 1920x1080x24');
+    });
+
+    it('user gets a window that stays anchored while the preview app resizes', () => {
+        expect(runtime).toContain("TOUCHAI_UI_PREVIEW: '1'");
     });
 });
