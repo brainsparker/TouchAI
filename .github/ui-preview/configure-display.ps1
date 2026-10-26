@@ -156,6 +156,19 @@ function Set-ResolutionWithModule {
     }
 }
 
+function Set-BaselineResolution {
+    $baseline = New-Object TouchAiDisplay+DEVMODE
+    $baseline.dmSize = [System.Runtime.InteropServices.Marshal]::SizeOf($baseline)
+    $baseline.dmPelsWidth = 1920
+    $baseline.dmPelsHeight = 1080
+
+    if (Set-ResolutionWithModule -Mode $baseline) {
+        return $true
+    }
+
+    return Set-ResolutionWithWin32 -Mode $baseline
+}
+
 function Get-PrimaryDisplayBounds {
     return [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 }
@@ -177,9 +190,15 @@ function Export-DisplaySize {
     Write-Host "display: $($Bounds.Width)x$($Bounds.Height); stage: $($Bounds.Width)x$($Bounds.Height) at 1x"
 }
 
-$modes = @(Get-DisplayModes)
-
 if ($List) {
+    $modes = @(Get-DisplayModes)
+
+    if ($modes.Count -eq 0) {
+        $bounds = Get-PrimaryDisplayBounds
+        Write-Host "no enumerated modes; current display is $($bounds.Width)x$($bounds.Height)"
+        exit 0
+    }
+
     $modes |
         Sort-Object { $_.dmPelsWidth * $_.dmPelsHeight } -Descending |
         ForEach-Object {
@@ -192,9 +211,23 @@ if ($env:GITHUB_ACTIONS -ne 'true') {
     throw 'Display configuration is only allowed on the disposable hosted runner'
 }
 
+if (Set-BaselineResolution) {
+    Start-Sleep -Seconds 2
+} else {
+    Write-Host 'could not set the 1920x1080 baseline; using the current display'
+}
+
+$modes = @(Get-DisplayModes)
 $candidates = @(Get-OrderedDisplayModes -Modes $modes)
 
 if ($candidates.Count -eq 0) {
+    $bounds = Get-PrimaryDisplayBounds
+
+    if ($bounds.Width -ge 1280 -and $bounds.Height -ge 800) {
+        Export-DisplaySize -Bounds $bounds
+        exit 0
+    }
+
     throw 'No display mode at least 1280x800 is available'
 }
 
