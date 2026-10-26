@@ -121,7 +121,11 @@ function renderPlatform(platform, fallbackAssets) {
     const assets = platform.assets ?? fallbackAssets ?? {};
     const label = platform.label ?? platformLabel(platform.platform);
     const mode = platform.captureMode ? ` · ${platform.captureMode}` : '';
-    const lines = [`### ${label}${mode}`];
+    const display = platform.display
+        ? ` · ${platform.display.width}x${platform.display.height}`
+        : '';
+    const scale = Number(platform.scale) > 1 ? ` · ${platform.scale}x` : '';
+    const lines = [`### ${label}${mode}${display}${scale}`];
 
     if (platform.failure) {
         lines.push('', `**Recording stopped:** ${platform.failure}`);

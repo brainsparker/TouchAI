@@ -153,6 +153,8 @@ describe('user reads one preview comment for three native builds', () => {
         {
             platform: 'linux',
             captureMode: 'x11grab',
+            display: { width: 2560, height: 1600 },
+            scale: 2,
             videoUrl: 'https://github.com/user-attachments/assets/linux-video',
             scenes: [
                 {
@@ -172,6 +174,8 @@ describe('user reads one preview comment for three native builds', () => {
         {
             platform: 'macos',
             captureMode: 'avfoundation',
+            display: { width: 2560, height: 1600 },
+            scale: 2,
             videoUrl: 'https://github.com/user-attachments/assets/macos-video',
             scenes: [
                 {
@@ -187,6 +191,8 @@ describe('user reads one preview comment for three native builds', () => {
         {
             platform: 'windows',
             captureMode: 'gdigrab',
+            display: { width: 1920, height: 1080 },
+            scale: 1,
             videoUrl: 'https://github.com/user-attachments/assets/windows-video',
             scenes: [
                 {
@@ -204,9 +210,9 @@ describe('user reads one preview comment for three native builds', () => {
     it('user sees a labelled section and a visible video for every platform', () => {
         const body = buildPreviewComment({ ...baseComment, platforms });
 
-        expect(body).toContain('### Linux · x11grab');
-        expect(body).toContain('### macOS · avfoundation');
-        expect(body).toContain('### Windows · gdigrab');
+        expect(body).toContain('### Linux · x11grab · 2560x1600 · 2x');
+        expect(body).toContain('### macOS · avfoundation · 2560x1600 · 2x');
+        expect(body).toContain('### Windows · gdigrab · 1920x1080');
         expect(body).toContain('\nhttps://github.com/user-attachments/assets/linux-video\n');
         expect(body).toContain('\nhttps://github.com/user-attachments/assets/macos-video\n');
         expect(body).toContain('\nhttps://github.com/user-attachments/assets/windows-video\n');

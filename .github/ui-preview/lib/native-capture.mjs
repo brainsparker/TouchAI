@@ -2,16 +2,16 @@
  * Native screen recording for each desktop platform.
  *
  * The video is always a real screen capture, not a sequence of screenshots.
- * The capture is cropped to the 1280x900 preview stage in the caption pass so
- * Linux, macOS, and Windows produce the same output shape even when the runner
- * display is 1920x1080.
+ * The capture is cropped to the configured preview stage in the caption pass
+ * so Linux, macOS, and Windows produce the same output shape even when the
+ * runner display is larger than the stage.
  */
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 
-import { SCREEN_HEIGHT, SCREEN_WIDTH } from './capture.mjs';
 import { captureMode } from './platform.mjs';
+import { resolveCaptureProfile } from './profile.mjs';
 
 const FIRST_FRAME_TIMEOUT_MS = 20000;
 const STOP_TIMEOUT_MS = 10000;
@@ -97,19 +97,22 @@ export function buildRecordingArgs({ platform, display = ':99', width, height, f
  * top-left keeps the app window, which the recorder pins there, and drops the
  * rest of the desktop.
  */
-export function buildCropFilter(width, height) {
-    if (Number(width) <= SCREEN_WIDTH && Number(height) <= SCREEN_HEIGHT) {
+export function buildCropFilter(width, height, stage = resolveCaptureProfile().physical) {
+    if (Number(width) <= stage.width && Number(height) <= stage.height) {
         return null;
     }
 
-    return `crop=${SCREEN_WIDTH}:${SCREEN_HEIGHT}:0:0`;
+    return `crop=${stage.width}:${stage.height}:0:0`;
 }
 
-export function parseDisplaySize(env = process.env, platform = 'linux') {
-    const width = Number(env.UI_PREVIEW_DISPLAY_WIDTH ?? (platform === 'linux' ? SCREEN_WIDTH : 0));
-    const height = Number(
-        env.UI_PREVIEW_DISPLAY_HEIGHT ?? (platform === 'linux' ? SCREEN_HEIGHT : 0)
-    );
+export function parseDisplaySize(
+    env = process.env,
+    platform = 'linux',
+    profile = resolveCaptureProfile(env)
+) {
+    const fallback = platform === 'linux' ? profile.physical : { width: 0, height: 0 };
+    const width = Number(env.UI_PREVIEW_DISPLAY_WIDTH ?? fallback.width);
+    const height = Number(env.UI_PREVIEW_DISPLAY_HEIGHT ?? fallback.height);
 
     return {
         width: Number.isFinite(width) ? width : 0,

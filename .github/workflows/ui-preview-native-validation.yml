@@ -84,12 +84,16 @@ jobs:
 
             - name: Configure the hosted display (macOS)
               if: matrix.platform == 'macos'
-              run: swift .github/ui-preview/macos-display.swift --configure-hosted
+              run: |
+                  swift .github/ui-preview/macos-display.swift --list
+                  swift .github/ui-preview/macos-display.swift --configure-hosted
 
             - name: Configure the hosted display (Windows)
               if: matrix.platform == 'windows'
               shell: pwsh
-              run: ./.github/ui-preview/configure-display.ps1
+              run: |
+                  ./.github/ui-preview/configure-display.ps1 -List
+                  ./.github/ui-preview/configure-display.ps1
 
             - name: Build the desktop app
               run: pnpm tauri build --debug --no-bundle --features ui-preview-webdriver
@@ -111,11 +115,16 @@ jobs:
                   UI_PREVIEW_OUT: ${{ github.workspace }}/ui-preview-out
                   UI_PREVIEW_SHA: ${{ github.event.pull_request.head.sha }}
                   UI_PREVIEW_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-                  UI_PREVIEW_DISPLAY_WIDTH: '1280'
-                  UI_PREVIEW_DISPLAY_HEIGHT: '900'
+                  UI_PREVIEW_DISPLAY_WIDTH: '2560'
+                  UI_PREVIEW_DISPLAY_HEIGHT: '1600'
+                  UI_PREVIEW_STAGE_WIDTH: '1280'
+                  UI_PREVIEW_STAGE_HEIGHT: '800'
+                  UI_PREVIEW_STAGE_TOP: '40'
+                  UI_PREVIEW_SCALE_FACTOR: '2'
+                  GDK_SCALE: '2'
                   TOUCHAI_APP_ROOT: ${{ runner.temp }}/ui-preview-app-root
               run: |
-                  xvfb-run -a --server-args='-screen 0 1280x900x24' \
+                  xvfb-run -a --server-args='-screen 0 2560x1600x24' \
                     .github/ui-preview/with-display.sh \
                     node .github/ui-preview/explore.mjs
 
@@ -164,11 +173,16 @@ jobs:
                   UI_PREVIEW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
                   UI_PREVIEW_TRIGGER: native validation
                   UI_PREVIEW_SEED: '1'
-                  UI_PREVIEW_DISPLAY_WIDTH: '1280'
-                  UI_PREVIEW_DISPLAY_HEIGHT: '900'
+                  UI_PREVIEW_DISPLAY_WIDTH: '2560'
+                  UI_PREVIEW_DISPLAY_HEIGHT: '1600'
+                  UI_PREVIEW_STAGE_WIDTH: '1280'
+                  UI_PREVIEW_STAGE_HEIGHT: '800'
+                  UI_PREVIEW_STAGE_TOP: '40'
+                  UI_PREVIEW_SCALE_FACTOR: '2'
+                  GDK_SCALE: '2'
                   TOUCHAI_APP_ROOT: ${{ runner.temp }}/ui-preview-app-root
               run: |
-                  xvfb-run -a --server-args='-screen 0 1280x900x24' \
+                  xvfb-run -a --server-args='-screen 0 2560x1600x24' \
                     .github/ui-preview/with-display.sh node .github/ui-preview/record.mjs
 
             - name: Upload evidence

@@ -11,6 +11,7 @@ describe('user reads the burned-in captions', () => {
         const ass = buildAss({
             title: 'c616766 · Settings',
             durationMs: 12000,
+            stage: { width: 1280, height: 800 },
             steps: [
                 { startMs: 500, endMs: 3000, text: 'Open Settings' },
                 { startMs: 3000, endMs: 6000, text: 'Open Shortcuts' },
@@ -19,6 +20,8 @@ describe('user reads the burned-in captions', () => {
 
         expect(ass).toContain('Style: Title');
         expect(ass).toContain('c616766 · Settings');
+        expect(ass).toContain('PlayResX: 1280');
+        expect(ass).toContain('PlayResY: 800');
         expect(ass).toContain('0:00:00.50,0:00:03.00');
         expect(ass).toContain('0:00:03.00,0:00:06.00');
     });

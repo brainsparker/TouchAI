@@ -40,6 +40,10 @@ export function isMp4(buffer) {
     return buffer.length > 12 && buffer.subarray(4, 8).equals(MP4_FTYP);
 }
 
+function isPositiveInteger(value) {
+    return Number.isInteger(Number(value)) && Number(value) > 0;
+}
+
 /**
  * @param {string} evidenceDir
  * @param {object} manifest
@@ -87,6 +91,32 @@ export function validateEvidence(evidenceDir, manifest) {
         errors.push(
             `manifest capture mode ${manifest.captureMode} does not match ${manifest.platform}`
         );
+    }
+
+    if (manifest.stage) {
+        const stage = manifest.stage;
+        const scale = Number(manifest.scale);
+
+        if (!isPositiveInteger(stage.width) || !isPositiveInteger(stage.height)) {
+            errors.push('manifest stage is not a positive pixel size');
+        }
+
+        if (!Number.isFinite(scale) || scale <= 0 || scale > 4) {
+            errors.push('manifest scale is not between 0 and 4');
+        }
+
+        if (manifest.physicalStage) {
+            const physical = manifest.physicalStage;
+
+            if (!isPositiveInteger(physical.width) || !isPositiveInteger(physical.height)) {
+                errors.push('manifest physical stage is not a positive pixel size');
+            } else if (
+                Math.abs(Number(physical.width) - Math.round(Number(stage.width) * scale)) > 2 ||
+                Math.abs(Number(physical.height) - Math.round(Number(stage.height) * scale)) > 2
+            ) {
+                errors.push('manifest physical stage does not match its logical size and scale');
+            }
+        }
     }
 
     const scenes = Array.isArray(manifest.scenes) ? manifest.scenes : [];
@@ -186,6 +216,17 @@ export function validateEvidence(evidenceDir, manifest) {
 
                 if (width < 320 || height < 240) {
                     errors.push('video is smaller than any app window');
+                }
+
+                if (manifest.physicalStage) {
+                    const expectedWidth = Number(manifest.physicalStage.width);
+                    const expectedHeight = Number(manifest.physicalStage.height);
+
+                    if (width !== expectedWidth || height !== expectedHeight) {
+                        errors.push(
+                            `video is ${width}x${height}, not the native ${expectedWidth}x${expectedHeight} stage`
+                        );
+                    }
                 }
             }
         }

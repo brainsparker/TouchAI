@@ -20,6 +20,7 @@ import {
 import { checkLocaleParity } from './lib/i18n.mjs';
 import { parseDisplaySize } from './lib/native-capture.mjs';
 import { captureMode, detectPlatform, isUsableDisplay, platformLabel } from './lib/platform.mjs';
+import { resolveCaptureProfile, stageLabel } from './lib/profile.mjs';
 import {
     boot,
     collectOutline,
@@ -78,16 +79,24 @@ async function main() {
     const sha = env('UI_PREVIEW_SHA');
     const display = env('DISPLAY', ':99');
     const platform = detectPlatform();
-    const displaySize = parseDisplaySize(process.env, platform);
+    const profile = resolveCaptureProfile(process.env);
+    const displaySize = parseDisplaySize(process.env, platform, profile);
     const files = changedFiles();
 
     if (!application || !fs.existsSync(application)) {
         throw new Error(`UI_PREVIEW_APP_BINARY does not exist: ${application}`);
     }
 
-    if (!isUsableDisplay(displaySize.width, displaySize.height)) {
+    if (
+        !isUsableDisplay(
+            displaySize.width,
+            displaySize.height,
+            profile.physical.width,
+            profile.physical.height
+        )
+    ) {
         throw new Error(
-            `${platformLabel(platform)} exposes ${displaySize.width}x${displaySize.height}; the preview needs at least 1280x900`
+            `${platformLabel(platform)} exposes ${displaySize.width}x${displaySize.height}; the preview needs at least ${profile.physical.width}x${profile.physical.height}`
         );
     }
 
@@ -120,7 +129,7 @@ async function main() {
 
         try {
             if (platform === 'linux') {
-                const geometry = windowForSurface(display, 'search');
+                const geometry = windowForSurface(display, 'search', profile.scale);
 
                 if (geometry) {
                     raiseWindow(display, geometry.id);
@@ -146,6 +155,9 @@ async function main() {
             platform,
             captureMode: captureMode(platform),
             display: displaySize,
+            stage: profile.stage,
+            scale: profile.scale,
+            physicalStage: profile.physical,
             files,
             testIds: {
                 search: [...new Set([...searchTestIds, ...settingsOutline.testIds])].sort(),
@@ -168,7 +180,7 @@ async function main() {
 
         fs.writeFileSync(path.join(outDir, 'facts.json'), `${JSON.stringify(facts, null, 2)}\n`);
         console.log(
-            `outline: ${facts.testIds.settings.length} settings test ids, ${facts.settingsSections.length} sections`
+            `outline: ${facts.testIds.settings.length} settings test ids, ${facts.settingsSections.length} sections, ${stageLabel(profile)}`
         );
     } finally {
         await runtime.close();

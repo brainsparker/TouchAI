@@ -11,11 +11,6 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const SCREEN_WIDTH = 1280;
-export const SCREEN_HEIGHT = 900;
-// The active window starts below the burned-in title, so the caption never
-// covers the app.
-export const STAGE_TOP = 64;
 // picom renders the root window black on this Xvfb build even after the root
 // pixmap is set, so black is the colour the capture actually shows.
 export const DESKTOP_COLOUR = '#000000';
@@ -126,7 +121,7 @@ export function windowGeometry(display, id) {
  * surface decides by size. This does not depend on input focus, which is not
  * reliable when the driver drives the app instead of a person.
  */
-export function windowForSurface(display, surface) {
+export function windowForSurface(display, surface, scale = 1) {
     const env = { ...process.env, DISPLAY: display };
     const listed = run('xdotool', ['search', '--onlyvisible', '--name', 'TouchAI'], { env });
     const ids = listed.stdout
@@ -143,10 +138,10 @@ export function windowForSurface(display, surface) {
 
     const score = (geometry) =>
         surface === 'settings'
-            ? (geometry.width >= 900 && geometry.height >= 500 ? 0 : 10000) +
-              Math.abs(geometry.width - 1120) +
-              Math.abs(geometry.height - 700)
-            : (geometry.width <= 900 ? 0 : 10000) + Math.abs(geometry.width - 750);
+            ? (geometry.width >= 900 * scale && geometry.height >= 500 * scale ? 0 : 10000) +
+              Math.abs(geometry.width - 1120 * scale) +
+              Math.abs(geometry.height - 700 * scale)
+            : (geometry.width <= 900 * scale ? 0 : 10000) + Math.abs(geometry.width - 750 * scale);
 
     return candidates.sort((left, right) => score(left) - score(right))[0];
 }
@@ -227,11 +222,14 @@ export function cropToElement({
     const wanted = {
         width: Math.min(
             size.width,
-            Math.max(minWidth, Math.round((rect.width + padding * 2) * scaleX))
+            Math.max(Math.round(minWidth * scaleX), Math.round((rect.width + padding * 2) * scaleX))
         ),
         height: Math.min(
             size.height,
-            Math.max(minHeight, Math.round((rect.height + padding * 2) * scaleY))
+            Math.max(
+                Math.round(minHeight * scaleY),
+                Math.round((rect.height + padding * 2) * scaleY)
+            )
         ),
     };
     const centerX = (rect.x + rect.width / 2) * scaleX;
@@ -435,22 +433,28 @@ function assText(value) {
  * Builds a subtitle file for the burned-in captions. Captions live outside the
  * app window so they never cover the pixels a reviewer judges.
  *
- * @param {{ title?: string, durationMs: number, steps: Array<{ startMs: number, endMs: number, text: string }> }} input
+ * @param {{ title?: string, durationMs: number, steps: Array<{ startMs: number, endMs: number, text: string }>, stage?: { width: number, height: number } }} input
  */
 export function buildAss(input) {
     const duration = Math.max(1000, Math.round(input.durationMs));
+    const stage = input.stage ?? { width: 1280, height: 900 };
+    const scale = Math.max(0.85, Math.min(1.5, stage.width / 1280));
+    const titleSize = Math.round(20 * scale);
+    const stepSize = Math.round(18 * scale);
+    const titleMargin = Math.max(2, Math.round(4 * scale));
+    const stepMargin = Math.max(4, Math.round(8 * scale));
     const lines = [
         '[Script Info]',
         'ScriptType: v4.00+',
-        `PlayResX: ${SCREEN_WIDTH}`,
-        `PlayResY: ${SCREEN_HEIGHT}`,
+        `PlayResX: ${stage.width}`,
+        `PlayResY: ${stage.height}`,
         'WrapStyle: 0',
         'ScaledBorderAndShadow: yes',
         '',
         '[V4+ Styles]',
         'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-        'Style: Title,Noto Sans CJK SC,24,&H00FFFFFF,&H000000FF,&H00101010,&H80000000,-1,0,0,0,100,100,0,0,1,2,0,8,24,24,26,1',
-        'Style: Step,Noto Sans CJK SC,22,&H00FFFFFF,&H000000FF,&H80000000,&H80000000,0,0,0,0,100,100,0,0,3,6,0,2,24,24,34,1',
+        `Style: Title,Noto Sans CJK SC,${titleSize},&H00FFFFFF,&H000000FF,&H00101010,&H80000000,-1,0,0,0,100,100,0,0,1,2,0,8,24,24,${titleMargin},1`,
+        `Style: Step,Noto Sans CJK SC,${stepSize},&H00FFFFFF,&H000000FF,&H80000000,&H80000000,0,0,0,0,100,100,0,0,3,5,0,2,24,24,${stepMargin},1`,
         '',
         '[Events]',
         'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
@@ -513,6 +517,7 @@ export function burnCaptions({
     title,
     durationMs,
     steps,
+    stage,
     crop = null,
     runFfmpeg = run,
 }) {
@@ -523,7 +528,7 @@ export function burnCaptions({
         process.cwd(),
         `.touchai-ui-preview-${process.pid}-${Date.now()}.ass`
     );
-    fs.writeFileSync(assFile, buildAss({ title, durationMs, steps }));
+    fs.writeFileSync(assFile, buildAss({ title, durationMs, steps, stage }));
     const filters = [crop, `ass=filename=${filterPath(path.basename(assFile))}`]
         .filter(Boolean)
         .join(',');
@@ -568,6 +573,7 @@ export function finalizeRecording({
     title,
     durationMs,
     steps,
+    stage,
     crop = null,
     runFfmpeg = run,
 }) {
@@ -577,6 +583,7 @@ export function finalizeRecording({
         title,
         durationMs,
         steps,
+        stage,
         crop,
         runFfmpeg,
     });

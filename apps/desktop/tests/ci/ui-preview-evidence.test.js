@@ -241,6 +241,30 @@ describe('user publishes evidence that was recorded', () => {
         expect(result.errors.join(' ')).toContain('platform is not supported');
     });
 
+    it('user gets a failure when the video is not the native high-resolution stage', () => {
+        const root = makeRoot();
+        fs.mkdirSync(path.join(root, 'evidence'));
+        fs.writeFileSync(path.join(root, 'evidence/search.png'), png(400, 200));
+        fs.writeFileSync(path.join(root, 'evidence/recording.mp4'), mp4());
+
+        const result = validateEvidence(
+            root,
+            manifest({
+                stage: { width: 1280, height: 800, top: 40 },
+                scale: 2,
+                physicalStage: { width: 2560, height: 1600, top: 80 },
+                videoInfo: {
+                    ...manifest().videoInfo,
+                    width: 1280,
+                    height: 800,
+                },
+            })
+        );
+
+        expect(result.ok).toBe(false);
+        expect(result.errors.join(' ')).toContain('not the native 2560x1600 stage');
+    });
+
     it('user gets a failure when a failed recording does not say why', () => {
         const result = validateEvidence(makeRoot(), manifest({ video: null, videoInfo: null }));
 

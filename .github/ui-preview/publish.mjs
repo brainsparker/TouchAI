@@ -304,6 +304,7 @@ async function main() {
             label,
             captureMode: manifest.captureMode,
             display: manifest.display,
+            scale: manifest.scale,
             videoUrl,
             scenes: renderedScenes,
             assets,

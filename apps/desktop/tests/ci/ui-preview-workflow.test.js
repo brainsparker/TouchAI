@@ -77,8 +77,13 @@ describe('user opens a pull request that runs the preview', () => {
     it('user gets the hosted display configured before each native run', () => {
         expect(workflow).toContain('macos-display.swift --configure-hosted');
         expect(workflow).toContain('configure-display.ps1');
-        expect(workflow).toContain("UI_PREVIEW_DISPLAY_WIDTH: '1280'");
-        expect(workflow).toContain("UI_PREVIEW_DISPLAY_HEIGHT: '900'");
+        expect(workflow).toContain("UI_PREVIEW_DISPLAY_WIDTH: '2560'");
+        expect(workflow).toContain("UI_PREVIEW_DISPLAY_HEIGHT: '1600'");
+        expect(workflow).toContain("UI_PREVIEW_STAGE_WIDTH: '1280'");
+        expect(workflow).toContain("UI_PREVIEW_STAGE_HEIGHT: '800'");
+        expect(workflow).toContain("UI_PREVIEW_SCALE_FACTOR: '2'");
+        expect(workflow).toContain("GDK_SCALE: '2'");
+        expect(workflow).toContain('-screen 0 2560x1600x24');
     });
 
     it('user gets every platform evidence artifact merged into one publish job', () => {

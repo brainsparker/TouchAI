@@ -12,6 +12,7 @@ import {
     isUsableDisplay,
     platformLabel,
 } from '../../../../.github/ui-preview/lib/platform.mjs';
+import { resolveCaptureProfile } from '../../../../.github/ui-preview/lib/profile.mjs';
 
 describe('user records the preview on a native desktop', () => {
     it('user gets the platform name from the runner operating system', () => {
@@ -108,13 +109,17 @@ describe('user records with the platform capture device', () => {
 
 describe('user gets the same preview stage from a larger desktop', () => {
     it('user gets a top-left crop when the hosted display is larger', () => {
-        expect(buildCropFilter(1920, 1080)).toBe('crop=1280:900:0:0');
-        expect(buildCropFilter(1440, 900)).toBe('crop=1280:900:0:0');
+        const stage = { width: 2560, height: 1600 };
+
+        expect(buildCropFilter(3840, 2160, stage)).toBe('crop=2560:1600:0:0');
+        expect(buildCropFilter(2560, 1800, stage)).toBe('crop=2560:1600:0:0');
     });
 
     it('user gets no crop when the display is already the stage size', () => {
-        expect(buildCropFilter(1280, 900)).toBeNull();
-        expect(buildCropFilter(1280, 1024)).toBe('crop=1280:900:0:0');
+        const stage = { width: 2560, height: 1600 };
+
+        expect(buildCropFilter(2560, 1600, stage)).toBeNull();
+        expect(buildCropFilter(2560, 1800, stage)).toBe('crop=2560:1600:0:0');
     });
 
     it('user gets the display size exported by the workflow', () => {
@@ -129,5 +134,19 @@ describe('user gets the same preview stage from a larger desktop', () => {
         ).toEqual({ width: 1920, height: 1080 });
         expect(parseDisplaySize({}, 'linux')).toEqual({ width: 1280, height: 900 });
         expect(parseDisplaySize({}, 'windows')).toEqual({ width: 0, height: 0 });
+    });
+
+    it('user gets a 2x physical stage without changing the logical layout', () => {
+        const profile = resolveCaptureProfile({
+            UI_PREVIEW_STAGE_WIDTH: '1280',
+            UI_PREVIEW_STAGE_HEIGHT: '800',
+            UI_PREVIEW_STAGE_TOP: '40',
+            UI_PREVIEW_SCALE_FACTOR: '2',
+        });
+
+        expect(profile.stage).toEqual({ width: 1280, height: 800, top: 40 });
+        expect(profile.scale).toBe(2);
+        expect(profile.physical).toEqual({ width: 2560, height: 1600, top: 80 });
+        expect(parseDisplaySize({}, 'linux', profile)).toEqual({ width: 2560, height: 1600 });
     });
 });

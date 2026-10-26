@@ -27,15 +27,14 @@ import {
     pngSize,
     probeVideo,
     raiseWindow,
-    SCREEN_WIDTH,
     showWindow,
-    STAGE_TOP,
     windowForSurface,
     windowGeometry,
 } from './lib/capture.mjs';
 import { buildCropFilter, parseDisplaySize, startNativeRecording } from './lib/native-capture.mjs';
 import { ELEMENT_CENTER_SCRIPT, ELEMENT_ROW_RECT_SCRIPT } from './lib/overlay.mjs';
 import { captureMode, detectPlatform, isUsableDisplay, platformLabel } from './lib/platform.mjs';
+import { resolveCaptureProfile, stageLabel } from './lib/profile.mjs';
 import {
     boot,
     bridge,
@@ -171,6 +170,7 @@ async function waitForSectionContent(session, target) {
 async function isolateLinuxSurface(display, surface, state) {
     state.windows ??= {};
     state.activeSurface = surface;
+    const profile = state.profile;
 
     let target = null;
 
@@ -180,7 +180,7 @@ async function isolateLinuxSurface(display, surface, state) {
         target = windowGeometry(display, state.windows[surface]);
     }
 
-    target ??= windowForSurface(display, surface);
+    target ??= windowForSurface(display, surface, state.profile.scale);
 
     if (!target) {
         return null;
@@ -197,7 +197,12 @@ async function isolateLinuxSurface(display, surface, state) {
     }
 
     showWindow(display, target.id);
-    moveWindow(display, target.id, Math.max(0, Math.round((1280 - target.width) / 2)), STAGE_TOP);
+    moveWindow(
+        display,
+        target.id,
+        Math.max(0, Math.round((profile.physical.width - target.width) / 2)),
+        profile.physical.top
+    );
     raiseWindow(display, target.id);
     await sleep(250);
     return target;
@@ -213,7 +218,7 @@ async function isolateWebviewSurface(session, surface, state) {
     const handle = await switchToSurface(session, surface, state);
     state.handles ??= {};
     state.handles[surface] = handle;
-    const rect = await placeWebviewWindow(session, handle);
+    const rect = await placeWebviewWindow(session, handle, state.profile);
 
     for (const [name, other] of Object.entries(state.handles)) {
         if (name === surface || !other) {
@@ -233,21 +238,21 @@ async function isolateWebviewSurface(session, surface, state) {
     await sleep(250);
     return {
         id: handle,
-        x: Math.max(0, Math.round((SCREEN_WIDTH - rect.width) / 2)),
-        y: STAGE_TOP,
+        x: Math.max(0, Math.round((state.profile.stage.width - rect.width) / 2)),
+        y: state.profile.stage.top,
         width: rect.width,
         height: rect.height,
     };
 }
 
-async function placeWebviewWindow(session, handle) {
+async function placeWebviewWindow(session, handle, profile) {
     await session.switchTo(handle);
     await session.focusWindow();
     const rect = await session.getWindowRect();
-    const x = Math.max(0, Math.round((SCREEN_WIDTH - rect.width) / 2));
+    const x = Math.max(0, Math.round((profile.stage.width - rect.width) / 2));
 
-    if (Math.abs(rect.x - x) > 2 || Math.abs(rect.y - STAGE_TOP) > 2) {
-        await session.setWindowRect({ x, y: STAGE_TOP });
+    if (Math.abs(rect.x - x) > 2 || Math.abs(rect.y - profile.stage.top) > 2) {
+        await session.setWindowRect({ x, y: profile.stage.top });
     }
 
     return rect;
@@ -296,6 +301,8 @@ function describeStep(step) {
  * mid-clip. Re-pinning it after each step keeps the recording steady.
  */
 async function keepWindowInPlace({ session, platform, display, surface, state }) {
+    const profile = state.profile;
+
     if (platform !== 'linux') {
         const handle = state.handles?.[surface];
 
@@ -305,10 +312,10 @@ async function keepWindowInPlace({ session, platform, display, surface, state })
 
         await session.switchTo(handle);
         const rect = await session.getWindowRect();
-        const x = Math.max(0, Math.round((SCREEN_WIDTH - rect.width) / 2));
+        const x = Math.max(0, Math.round((profile.stage.width - rect.width) / 2));
 
-        if (Math.abs(rect.x - x) > 2 || Math.abs(rect.y - STAGE_TOP) > 2) {
-            await session.setWindowRect({ x, y: STAGE_TOP });
+        if (Math.abs(rect.x - x) > 2 || Math.abs(rect.y - profile.stage.top) > 2) {
+            await session.setWindowRect({ x, y: profile.stage.top });
             await sleep(120);
         }
 
@@ -323,15 +330,15 @@ async function keepWindowInPlace({ session, platform, display, surface, state })
 
     const geometry = windowGeometry(display, id);
 
-    if (!geometry || Math.abs(geometry.y - STAGE_TOP) <= 2) {
+    if (!geometry || Math.abs(geometry.y - profile.physical.top) <= 2) {
         return;
     }
 
     moveWindow(
         display,
         id,
-        Math.max(0, Math.round((SCREEN_WIDTH - geometry.width) / 2)),
-        STAGE_TOP
+        Math.max(0, Math.round((profile.physical.width - geometry.width) / 2)),
+        profile.physical.top
     );
     await sleep(120);
 }
@@ -366,9 +373,10 @@ async function captureStill({ session, platform, display, surface, state, file }
         return null;
     }
 
-    const candidates = [state.windows?.[surface], windowForSurface(display, surface)?.id].filter(
-        Boolean
-    );
+    const candidates = [
+        state.windows?.[surface],
+        windowForSurface(display, surface, state.profile.scale)?.id,
+    ].filter(Boolean);
 
     for (let attempt = 1; attempt <= 3; attempt += 1) {
         await session.execute('window.__UI_PREVIEW__?.hide();');
@@ -683,7 +691,8 @@ async function main() {
     const evidenceDir = ensureDir(path.join(outDir, 'evidence'));
     const platform = detectPlatform();
     const display = env('DISPLAY', ':99');
-    const displaySize = parseDisplaySize(process.env, platform);
+    const profile = resolveCaptureProfile(process.env);
+    const displaySize = parseDisplaySize(process.env, platform, profile);
     const sha = env('UI_PREVIEW_SHA');
     const title = env('UI_PREVIEW_TITLE');
     const appRoot = env('TOUCHAI_APP_ROOT');
@@ -706,6 +715,9 @@ async function main() {
         platform,
         captureMode: captureMode(platform),
         display: displaySize,
+        stage: profile.stage,
+        scale: profile.scale,
+        physicalStage: profile.physical,
         source: plan.source ?? 'model',
         summary: plan.summary ?? '',
         mismatch: plan.mismatch ?? '',
@@ -743,7 +755,14 @@ async function main() {
         return;
     }
 
-    if (!isUsableDisplay(displaySize.width, displaySize.height)) {
+    if (
+        !isUsableDisplay(
+            displaySize.width,
+            displaySize.height,
+            profile.physical.width,
+            profile.physical.height
+        )
+    ) {
         manifest.checks.push({
             name: 'Display',
             status: 'fail',
@@ -751,7 +770,7 @@ async function main() {
         });
         fail(
             'display',
-            `${platformLabel(platform)} exposes ${displaySize.width}x${displaySize.height}; native capture needs at least 1280x900`
+            `${platformLabel(platform)} exposes ${displaySize.width}x${displaySize.height}; native capture needs at least ${profile.physical.width}x${profile.physical.height}`
         );
         persist();
         return;
@@ -760,7 +779,7 @@ async function main() {
     manifest.checks.push({
         name: 'Display',
         status: 'pass',
-        detail: `${displaySize.width}x${displaySize.height}`,
+        detail: `${displaySize.width}x${displaySize.height} display, ${stageLabel(profile)} stage`,
     });
 
     if (platform === 'linux') {
@@ -836,13 +855,14 @@ async function main() {
         await waitForPaint(session);
 
         const state = {
+            profile,
             mainHandle,
             settingsHandle: opened.settings,
             windows:
                 platform === 'linux'
                     ? {
-                          search: windowForSurface(display, 'search')?.id,
-                          settings: windowForSurface(display, 'settings')?.id,
+                          search: windowForSurface(display, 'search', profile.scale)?.id,
+                          settings: windowForSurface(display, 'settings', profile.scale)?.id,
                       }
                     : undefined,
             handles:
@@ -867,15 +887,15 @@ async function main() {
                 try {
                     const geometry = windowGeometry(display, id);
 
-                    if (!geometry || Math.abs(geometry.y - STAGE_TOP) <= 2) {
+                    if (!geometry || Math.abs(geometry.y - profile.physical.top) <= 2) {
                         return;
                     }
 
                     moveWindow(
                         display,
                         id,
-                        Math.max(0, Math.round((SCREEN_WIDTH - geometry.width) / 2)),
-                        STAGE_TOP
+                        Math.max(0, Math.round((profile.physical.width - geometry.width) / 2)),
+                        profile.physical.top
                     );
                 } catch {
                     // The window may be between map and unmap during a scene change.
@@ -1004,7 +1024,11 @@ async function main() {
                             }
                             await session.switchTo(state.settingsHandle);
                             if (platform !== 'linux') {
-                                await placeWebviewWindow(session, state.settingsHandle);
+                                await placeWebviewWindow(
+                                    session,
+                                    state.settingsHandle,
+                                    state.profile
+                                );
                             }
                             await ensureOverlay(session);
                             await waitForPaint(session);
@@ -1016,7 +1040,7 @@ async function main() {
                         state.handles ??= {};
                         state.handles.settings = next.settings;
                         if (platform !== 'linux') {
-                            await placeWebviewWindow(session, next.settings);
+                            await placeWebviewWindow(session, next.settings, state.profile);
                         }
                         await waitForPaint(session);
                         await sleep(500);
@@ -1147,13 +1171,18 @@ async function main() {
             const result = await recording.stop();
 
             if (result.ok) {
-                const crop = buildCropFilter(displaySize.width, displaySize.height);
+                const crop = buildCropFilter(
+                    displaySize.width,
+                    displaySize.height,
+                    profile.physical
+                );
                 const finalized = finalizeRecording({
                     input: rawVideo,
                     output: videoFile,
                     title: `${sha.slice(0, 7)} · ${title || 'UI preview'}`,
                     durationMs,
                     steps: timeline,
+                    stage: profile.stage,
                     crop,
                 });
 
@@ -1188,10 +1217,22 @@ async function main() {
                         coverage,
                         mode: captureMode(platform),
                         display: displaySize,
+                        stage: profile.stage,
+                        scale: profile.scale,
+                        physicalStage: profile.physical,
                     };
                     manifest.video = path.basename(videoFile);
 
                     manifest.checks.push(
+                        {
+                            name: 'Native resolution',
+                            status:
+                                info.width === profile.physical.width &&
+                                info.height === profile.physical.height
+                                    ? 'pass'
+                                    : 'fail',
+                            detail: `${info.width}x${info.height} at ${profile.scale}x`,
+                        },
                         {
                             name: 'Recording length',
                             status: info.durationSeconds >= MIN_VIDEO_SECONDS ? 'pass' : 'fail',
@@ -1326,6 +1367,7 @@ main().catch((error) => {
 
         if (!fs.existsSync(manifestPath)) {
             const platform = detectPlatform();
+            const profile = resolveCaptureProfile(process.env);
             fs.mkdirSync(outDir, { recursive: true });
             fs.writeFileSync(
                 manifestPath,
@@ -1336,7 +1378,10 @@ main().catch((error) => {
                         pr: Number(env('UI_PREVIEW_PR', '0')),
                         platform,
                         captureMode: captureMode(platform),
-                        display: parseDisplaySize(process.env, platform),
+                        display: parseDisplaySize(process.env, platform, profile),
+                        stage: profile.stage,
+                        scale: profile.scale,
+                        physicalStage: profile.physical,
                         scenes: [],
                         checks: [],
                         errors: [error.message],

@@ -1,8 +1,6 @@
-$ErrorActionPreference = 'Stop'
+param([switch]$List)
 
-if ($env:GITHUB_ACTIONS -ne 'true') {
-    throw 'Display configuration is only allowed on the disposable hosted runner'
-}
+$ErrorActionPreference = 'Stop'
 
 Add-Type @"
 using System;
@@ -55,9 +53,11 @@ public static class TouchAiDisplay {
 "@
 
 [TouchAiDisplay]::SetProcessDPIAware() | Out-Null
+Add-Type -AssemblyName System.Windows.Forms
 
-function Get-UsableDisplayModes {
+function Get-DisplayModes {
     $modes = @()
+    $seen = @{}
     $mode = New-Object TouchAiDisplay+DEVMODE
     $mode.dmSize = [System.Runtime.InteropServices.Marshal]::SizeOf($mode)
 
@@ -66,8 +66,18 @@ function Get-UsableDisplayModes {
             break
         }
 
-        if ($mode.dmPelsWidth -ge 1280 -and $mode.dmPelsHeight -ge 900) {
-            $modes += $mode
+        $key = "$($mode.dmPelsWidth)x$($mode.dmPelsHeight)"
+
+        if (
+            $mode.dmPelsWidth -ge 1280 -and
+            $mode.dmPelsHeight -ge 800 -and
+            $mode.dmPelsWidth -le 3840 -and
+            $mode.dmPelsHeight -le 2160 -and
+            -not $seen.ContainsKey($key)
+        ) {
+            $copy = $mode
+            $modes += $copy
+            $seen[$key] = $true
         }
 
         $mode.dmSize = [System.Runtime.InteropServices.Marshal]::SizeOf($mode)
@@ -76,23 +86,59 @@ function Get-UsableDisplayModes {
     return $modes
 }
 
-function Select-DisplayMode {
+function Get-OrderedDisplayModes {
     param([object[]] $Modes)
 
-    $preferred = $Modes |
-        Where-Object { $_.dmPelsWidth -eq 1920 -and $_.dmPelsHeight -eq 1080 } |
-        Select-Object -First 1
+    $ordered = @()
+    $seen = @{}
 
-    if ($preferred) {
-        return $preferred
+    foreach ($size in @(
+        @(3840, 2160),
+        @(2560, 1440),
+        @(2560, 1600),
+        @(1920, 1080)
+    )) {
+        $preferred = $Modes |
+            Where-Object {
+                $_.dmPelsWidth -eq $size[0] -and $_.dmPelsHeight -eq $size[1]
+            } |
+            Select-Object -First 1
+
+        if ($preferred -and -not $seen.ContainsKey("$($size[0])x$($size[1])")) {
+            $ordered += $preferred
+            $seen["$($size[0])x$($size[1])"] = $true
+        }
     }
 
-    return $Modes |
-        Sort-Object { $_.dmPelsWidth * $_.dmPelsHeight } |
-        Select-Object -First 1
+    foreach ($mode in ($Modes | Sort-Object { $_.dmPelsWidth * $_.dmPelsHeight } -Descending)) {
+        $key = "$($mode.dmPelsWidth)x$($mode.dmPelsHeight)"
+
+        if (-not $seen.ContainsKey($key)) {
+            $ordered += $mode
+            $seen[$key] = $true
+        }
+    }
+
+    return $ordered
+}
+
+function Set-ResolutionWithWin32 {
+    param([object] $Mode)
+
+    $Mode.dmFields = 0x80000 -bor 0x100000
+    $result = [TouchAiDisplay]::ChangeDisplaySettings([ref] $Mode, 0)
+
+    if ($result -ne 0) {
+        Write-Host "ChangeDisplaySettings returned $result for $($Mode.dmPelsWidth)x$($Mode.dmPelsHeight)"
+        return $false
+    }
+
+    return $true
 }
 
 function Set-ResolutionWithModule {
+    param([object] $Mode)
+
     if (-not (Get-Command Set-DisplayResolution -ErrorAction SilentlyContinue)) {
         Import-Module DisplayResolution -ErrorAction SilentlyContinue
     }
@@ -102,34 +148,13 @@ function Set-ResolutionWithModule {
     }
 
     try {
-        Set-DisplayResolution -Width 1920 -Height 1080 -Force
+        Set-DisplayResolution -Width $Mode.dmPelsWidth -Height $Mode.dmPelsHeight -Force
         return $true
     } catch {
         Write-Host "DisplayResolution module failed: $($_.Exception.Message)"
         return $false
     }
 }
-
-function Set-ResolutionWithWin32 {
-    $modes = @(Get-UsableDisplayModes)
-    $mode = Select-DisplayMode -Modes $modes
-
-    if (-not $mode) {
-        return $false
-    }
-
-    $mode.dmFields = 0x80000 -bor 0x100000
-    $result = [TouchAiDisplay]::ChangeDisplaySettings([ref] $mode, 0)
-
-    if ($result -ne 0) {
-        Write-Host "ChangeDisplaySettings returned $result for $($mode.dmPelsWidth)x$($mode.dmPelsHeight)"
-        return $false
-    }
-
-    return $true
-}
-
-Add-Type -AssemblyName System.Windows.Forms
 
 function Get-PrimaryDisplayBounds {
     return [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
@@ -138,36 +163,73 @@ function Get-PrimaryDisplayBounds {
 function Export-DisplaySize {
     param([object] $Bounds)
 
-    Add-Content -Path $env:GITHUB_ENV -Value "UI_PREVIEW_DISPLAY_WIDTH=$($Bounds.Width)" -Encoding ascii
-    Add-Content -Path $env:GITHUB_ENV -Value "UI_PREVIEW_DISPLAY_HEIGHT=$($Bounds.Height)" -Encoding ascii
-    Write-Host "display: $($Bounds.Width)x$($Bounds.Height)"
+    $stageTop = [Math]::Min(64, [Math]::Max(32, [Math]::Round($Bounds.Height * 0.05)))
+    $lines = @(
+        "UI_PREVIEW_DISPLAY_WIDTH=$($Bounds.Width)",
+        "UI_PREVIEW_DISPLAY_HEIGHT=$($Bounds.Height)",
+        "UI_PREVIEW_STAGE_WIDTH=$($Bounds.Width)",
+        "UI_PREVIEW_STAGE_HEIGHT=$($Bounds.Height)",
+        "UI_PREVIEW_STAGE_TOP=$stageTop",
+        "UI_PREVIEW_SCALE_FACTOR=1"
+    )
+
+    Add-Content -Path $env:GITHUB_ENV -Value $lines -Encoding ascii
+    Write-Host "display: $($Bounds.Width)x$($Bounds.Height); stage: $($Bounds.Width)x$($Bounds.Height) at 1x"
 }
 
-$changed = Set-ResolutionWithModule
+$modes = @(Get-DisplayModes)
 
-if ($changed) {
-    Start-Sleep -Seconds 2
-    $bounds = Get-PrimaryDisplayBounds
+if ($List) {
+    $modes |
+        Sort-Object { $_.dmPelsWidth * $_.dmPelsHeight } -Descending |
+        ForEach-Object {
+            Write-Host "$($_.dmPelsWidth)x$($_.dmPelsHeight) @ $($_.dmDisplayFrequency)Hz, $($_.dmLogPixels)dpi"
+        }
+    exit 0
+}
 
-    if ($bounds.Width -ge 1280 -and $bounds.Height -ge 900) {
-        Export-DisplaySize -Bounds $bounds
-        exit 0
+if ($env:GITHUB_ACTIONS -ne 'true') {
+    throw 'Display configuration is only allowed on the disposable hosted runner'
+}
+
+$candidates = @(Get-OrderedDisplayModes -Modes $modes)
+
+if ($candidates.Count -eq 0) {
+    throw 'No display mode at least 1280x800 is available'
+}
+
+$selected = $null
+$changed = $false
+
+foreach ($candidate in $candidates) {
+    Write-Host "trying display mode: $($candidate.dmPelsWidth)x$($candidate.dmPelsHeight)"
+    $changed = Set-ResolutionWithWin32 -Mode $candidate
+
+    if (
+        -not $changed -and
+        $candidate.dmPelsWidth -eq 1920 -and
+        $candidate.dmPelsHeight -eq 1080
+    ) {
+        $changed = Set-ResolutionWithModule -Mode $candidate
     }
 
-    Write-Host "DisplayResolution left the display at $($bounds.Width)x$($bounds.Height); trying Win32"
+    if ($changed) {
+        $selected = $candidate
+        break
+    }
 }
-
-$changed = Set-ResolutionWithWin32
 
 if (-not $changed) {
-    throw 'Cannot switch the hosted display to an unscaled mode at least 1280x900'
+    throw 'Cannot switch the hosted display to any supported mode'
 }
+
+Write-Host "selected display mode: $($selected.dmPelsWidth)x$($selected.dmPelsHeight)"
 
 Start-Sleep -Seconds 2
 $bounds = Get-PrimaryDisplayBounds
 
-if ($bounds.Width -lt 1280 -or $bounds.Height -lt 900) {
-    throw "Display is $($bounds.Width)x$($bounds.Height); native capture needs at least 1280x900"
+if ($bounds.Width -lt 1280 -or $bounds.Height -lt 800) {
+    throw "Display is $($bounds.Width)x$($bounds.Height); native capture needs at least 1280x800"
 }
 
 Export-DisplaySize -Bounds $bounds
