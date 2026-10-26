@@ -27,6 +27,11 @@ describe('user opens a pull request that runs the preview', () => {
         expect(workflow).toContain('ui-preview-${{');
     });
 
+    it('user gets the preview run preserved when the App adds its approval label', () => {
+        expect(workflow).toContain("endsWith(github.actor, '[bot]')");
+        expect(workflow).toContain("'approval' || 'run'");
+    });
+
     it('user gets the pull request code built only in a job without secrets', () => {
         const explore = jobBlock('explore');
 
